@@ -1,58 +1,91 @@
-// MongoDB Connection Utility
-// File: src/lib/mongodb.ts
+import { MongoClient, ServerApiVersion } from 'mongodb'
 
-import { MongoClient, Db } from 'mongodb';
+const uri = process.env.MONGODB_URI || "mongodb+srv://andreimiroiu2019:Andrei18@affilifycluster.ppnplhx.mongodb.net/?retryWrites=true&w=majority&appName=AffilifyCluster"
 
-if (!process.env.MONGODB_URI) {
-  throw new Error('Please add your MongoDB URI to .env.local');
-}
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  // Add SSL/TLS configuration to fix network errors
+  tls: true,
+  tlsAllowInvalidCertificates: false,
+  tlsAllowInvalidHostnames: false,
+  // Connection timeout and retry settings
+  connectTimeoutMS: 30000,
+  socketTimeoutMS: 30000,
+  maxPoolSize: 10,
+  minPoolSize: 1,
+  maxIdleTimeMS: 30000,
+  // Retry settings
+  retryWrites: true,
+  retryReads: true,
+})
 
-const uri = process.env.MONGODB_URI;
-const options = {};
+let isConnected = false
 
-let client: MongoClient;
-let clientPromise: Promise<MongoClient>;
-
-if (process.env.NODE_ENV === 'development') {
-  // In development mode, use a global variable so that the value
-  // is preserved across module reloads caused by HMR (Hot Module Replacement).
-  let globalWithMongo = global as typeof globalThis & {
-    _mongoClientPromise?: Promise<MongoClient>;
-  };
-
-  if (!globalWithMongo._mongoClientPromise) {
-    client = new MongoClient(uri, options);
-    globalWithMongo._mongoClientPromise = client.connect();
+export async function connectToDatabase() {
+  if (isConnected) {
+    return client
   }
-  clientPromise = globalWithMongo._mongoClientPromise;
-} else {
-  // In production mode, it's best to not use a global variable.
-  client = new MongoClient(uri, options);
-  clientPromise = client.connect();
-}
 
-// Export a module-scoped MongoClient promise. By doing this in a
-// separate module, the client can be shared across functions.
-export default clientPromise;
-
-// Helper function to get database connection
-export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db }> {
   try {
-    const client = await clientPromise;
-    const db = client.db('affilify'); // Database name
-    return { client, db };
+    // Connect the client to the server
+    await client.connect()
+    
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 })
+    console.log("Successfully connected to MongoDB!")
+    
+    isConnected = true
+    return client
   } catch (error) {
-    console.error('Failed to connect to MongoDB:', error);
-    throw new Error('Database connection failed');
+    console.error("Failed to connect to MongoDB:", error)
+    
+    // If connection fails, try with alternative connection string
+    const fallbackUri = "mongodb+srv://andreimiroiu2019:Andrei18@affilifycluster.ppnplhx.mongodb.net/affilify?retryWrites=true&w=majority&appName=AffilifyCluster"
+    
+    try {
+      const fallbackClient = new MongoClient(fallbackUri, {
+        serverApi: {
+          version: ServerApiVersion.v1,
+          strict: true,
+          deprecationErrors: true,
+        },
+        tls: true,
+        tlsAllowInvalidCertificates: false,
+        connectTimeoutMS: 30000,
+        socketTimeoutMS: 30000,
+      })
+      
+      await fallbackClient.connect()
+      await fallbackClient.db("admin").command({ ping: 1 })
+      console.log("Connected to MongoDB using fallback connection!")
+      
+      isConnected = true
+      return fallbackClient
+    } catch (fallbackError) {
+      console.error("Fallback connection also failed:", fallbackError)
+      throw new Error("Unable to connect to MongoDB with both primary and fallback connections")
+    }
   }
 }
 
-// Helper function to close database connection (for cleanup)
-export async function closeDatabaseConnection(): Promise<void> {
-  try {
-    const client = await clientPromise;
-    await client.close();
-  } catch (error) {
-    console.error('Failed to close MongoDB connection:', error);
-  }
+export async function getDatabase(dbName: string = 'affilify') {
+  const client = await connectToDatabase()
+  return client.db(dbName)
 }
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  if (isConnected) {
+    await client.close()
+    console.log('MongoDB connection closed.')
+    process.exit(0)
+  }
+})
+
+export default client
+
