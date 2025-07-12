@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     let decoded: any
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any
-    } catch (error) {
+    } catch (jwtError) {
       return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 })
     }
 
@@ -78,11 +78,15 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Analytics tracking error:', error)
+    
+    // Proper error type handling for TypeScript
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+    
     return NextResponse.json(
       { 
         success: false, 
         error: 'Failed to track analytics',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       },
       { status: 500 }
     )
@@ -95,4 +99,5 @@ export async function GET() {
     { status: 405 }
   )
 }
+
 
