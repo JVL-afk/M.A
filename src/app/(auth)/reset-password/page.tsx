@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import Navbar from '@/components/Navbar'
 
-export default function ResetPassword() {
+function ResetPasswordForm() {
   const [formData, setFormData] = useState({
     code: '',
     newPassword: '',
@@ -23,14 +23,14 @@ export default function ResetPassword() {
     setLoading(true)
     setMessage('')
 
-    if (formData.newPassword !== formData.confirmPassword) {
-      setMessage('Passwords do not match')
+    if (formData.newPassword.length < 8) {
+      setMessage('Password must be at least 8 characters long')
       setLoading(false)
       return
     }
 
-    if (formData.newPassword.length < 8) {
-      setMessage('Password must be at least 8 characters long')
+    if (formData.newPassword !== formData.confirmPassword) {
+      setMessage('Passwords do not match')
       setLoading(false)
       return
     }
@@ -68,22 +68,22 @@ export default function ResetPassword() {
     return (
       <div className="min-h-screen">
         <Navbar />
-        
         <div className="container mx-auto px-4 py-20">
-          <div className="max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-lg p-8 text-center">
-            <div className="text-6xl mb-4">✅</div>
-            <h1 className="text-3xl font-bold text-white mb-4">
-              Password Reset Successful!
-            </h1>
-            <p className="text-gray-300 mb-6">
-              Your password has been updated successfully. You will be redirected to the login page in a few seconds.
-            </p>
-            <Link 
-              href="/login"
-              className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold btn-hover inline-block"
-            >
-              Go to Login
-            </Link>
+          <div className="max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-lg p-8">
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold text-white mb-4">
+                Password Reset Successful!
+              </h1>
+              <p className="text-gray-300 mb-6">
+                Your password has been updated successfully. You will be redirected to the login page in a few seconds.
+              </p>
+              <Link
+                href="/login"
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg font-semibold btn-hover inline-block"
+              >
+                Go to Login
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -93,7 +93,6 @@ export default function ResetPassword() {
   return (
     <div className="min-h-screen">
       <Navbar />
-      
       <div className="container mx-auto px-4 py-20">
         <div className="max-w-md mx-auto bg-white/10 backdrop-blur-sm rounded-lg p-8">
           <h1 className="text-3xl font-bold text-white text-center mb-8">
@@ -107,47 +106,43 @@ export default function ResetPassword() {
               </p>
             </div>
           )}
-          
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-white mb-2">6-Digit Reset Code</label>
+              <label className="block text-white mb-2">Reset Code (from email)</label>
               <input
                 type="text"
-                required
-                maxLength={6}
-                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-red-500 focus:outline-none text-center text-2xl font-mono tracking-widest"
-                placeholder="000000"
                 value={formData.code}
-                onChange={(e) => setFormData({...formData, code: e.target.value.replace(/\D/g, '')})}
+                onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500"
+                placeholder="Enter reset code"
+                required
               />
-              <p className="text-sm text-gray-400 mt-1">
-                Enter the 6-digit code sent to your email
-              </p>
             </div>
-            
+
             <div>
               <label className="block text-white mb-2">New Password</label>
               <input
                 type="password"
+                value={formData.newPassword}
+                onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500"
+                placeholder="Enter new password"
                 required
                 minLength={8}
-                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-red-500 focus:outline-none"
-                placeholder="Enter new password"
-                value={formData.newPassword}
-                onChange={(e) => setFormData({...formData, newPassword: e.target.value})}
               />
             </div>
-            
+
             <div>
               <label className="block text-white mb-2">Confirm New Password</label>
               <input
                 type="password"
+                value={formData.confirmPassword}
+                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500"
+                placeholder="Confirm new password"
                 required
                 minLength={8}
-                className="w-full px-4 py-3 rounded-lg bg-white/20 text-white placeholder-gray-300 border border-white/30 focus:border-red-500 focus:outline-none"
-                placeholder="Confirm new password"
-                value={formData.confirmPassword}
-                onChange={(e) => setFormData({...formData, confirmPassword: e.target.value})}
               />
             </div>
 
@@ -156,33 +151,32 @@ export default function ResetPassword() {
                 {message}
               </div>
             )}
-            
+
             <button
               type="submit"
-              disabled={loading || formData.code.length !== 6}
-              className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg font-semibold btn-hover disabled:opacity-50"
+              disabled={loading}
+              className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg font-semibold btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Resetting Password...' : 'Reset Password 🔐'}
+              {loading ? 'Resetting Password...' : 'Reset Password'}
             </button>
           </form>
-          
+
           <div className="text-center mt-6">
-            <p className="text-gray-300 mb-2">
-              Didn't receive the code?
-            </p>
-            <Link href="/forgot-password" className="text-red-400 hover:text-red-300">
-              Request New Code
+            <Link href="/login" className="text-red-400 hover:text-red-300">
+              Back to Login
             </Link>
           </div>
-          
-          <p className="text-center text-gray-300 mt-4">
-            Remember your password?{' '}
-            <Link href="/login" className="text-red-400 hover:text-red-300">
-              Sign In
-            </Link>
-          </p>
         </div>
       </div>
     </div>
   )
 }
+
+export default function ResetPassword() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ResetPasswordForm />
+    </Suspense>
+  )
+}
+
