@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '../../../../lib/mongodb'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
+import { ObjectId } from 'mongodb'
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
     const db = client.db('affilify')
 
     // Check user's plan - API keys only for Enterprise users
-    const user = await db.collection('users').findOne({ _id: decoded.userId })
+    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) })
     if (!user) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
 
     // Get user's API keys
     const apiKeys = await db.collection('api_keys').find(
-      { userId: decoded.userId },
+      { userId: new ObjectId(decoded.userId) },
       { projection: { key: 0 } } // Don't return the actual key for security
     ).toArray()
 
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
     const db = client.db('affilify')
 
     // Check user's plan - API keys only for Enterprise users
-    const user = await db.collection('users').findOne({ _id: decoded.userId })
+    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) })
     if (!user) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
@@ -130,7 +131,7 @@ export async function POST(request: NextRequest) {
 
     // Check if user already has maximum number of API keys
     const existingKeysCount = await db.collection('api_keys').countDocuments({
-      userId: decoded.userId,
+      userId: new ObjectId(decoded.userId),
       isActive: true
     })
 
@@ -146,7 +147,7 @@ export async function POST(request: NextRequest) {
     
     // Store API key in database
     const newApiKey = {
-      userId: decoded.userId,
+      userId: new ObjectId(decoded.userId),
       name: name.trim(),
       key: apiKey,
       createdAt: new Date(),
@@ -196,6 +197,14 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    // Validate ObjectId format
+    if (!ObjectId.isValid(keyId)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid API key ID format' },
+        { status: 400 }
+      )
+    }
+
     // Get token from cookie
     const token = request.cookies.get('auth-token')?.value
     if (!token) {
@@ -222,8 +231,8 @@ export async function DELETE(request: NextRequest) {
     // Delete API key (soft delete by setting isActive to false)
     const updateResult = await db.collection('api_keys').updateOne(
       { 
-        _id: keyId,
-        userId: decoded.userId 
+        _id: new ObjectId(keyId),
+        userId: new ObjectId(decoded.userId)
       },
       { 
         $set: { 
