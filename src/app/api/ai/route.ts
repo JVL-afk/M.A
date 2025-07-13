@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '../../../lib/mongodb'
 import jwt from 'jsonwebtoken'
 
+// Define the plan type for better type safety
+type PlanType = 'basic' | 'pro' | 'enterprise'
+
 export async function POST(request: NextRequest) {
   try {
     const { prompt, type, context } = await request.json()
@@ -57,15 +60,16 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Define AI limits based on plan
-    const aiLimits = {
+    // Define AI limits based on plan with proper typing
+    const aiLimits: Record<PlanType, number> = {
       basic: 50,
       pro: 500,
       enterprise: -1 // unlimited
     }
 
-    const userPlan = user.plan || 'basic'
-    const limit = aiLimits[userPlan] || aiLimits.basic
+    // Safely cast user plan with fallback
+    const userPlan: PlanType = (user.plan as PlanType) || 'basic'
+    const limit = aiLimits[userPlan]
 
     if (limit !== -1 && monthlyAIRequests >= limit) {
       return NextResponse.json(
