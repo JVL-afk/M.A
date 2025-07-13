@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '../../../../lib/mongodb'
+import { connectToDatabase } from '../../../lib/mongodb'
 import jwt from 'jsonwebtoken'
-import Stripe from 'stripe'
 
-// Initialize Stripe without specifying API version to use the default
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
+// Define the plan type for better type safety
+type PlanType = 'basic' | 'pro' | 'enterprise'
 
 export async function POST(request: NextRequest) {
   try {
-    const { priceId, successUrl, cancelUrl } = await request.json()
+    const { prompt, type, context } = await request.json()
 
-    if (!priceId) {
+    if (!prompt || !type) {
       return NextResponse.json(
-        { success: false, error: 'Price ID is required' },
+        { success: false, error: 'Prompt and type are required' },
         { status: 400 }
       )
     }
@@ -49,78 +48,105 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create or retrieve Stripe customer
-    let customerId = user.stripeCustomerId
+    // Check AI usage limits based on plan
+    const currentMonth = new Date().getMonth()
+    const currentYear = new Date().getFullYear()
     
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        name: user.name,
-        metadata: {
-          userId: decoded.userId.toString()
-        }
-      })
-      
-      customerId = customer.id
-      
-      // Update user with Stripe customer ID
-      await db.collection('users').updateOne(
-        { _id: decoded.userId },
-        { $set: { stripeCustomerId: customerId } }
-      )
-    }
-
-    // Create checkout session
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
-      mode: 'subscription',
-      success_url: successUrl || `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancelUrl || `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
-      metadata: {
-        userId: decoded.userId.toString(),
-        priceId: priceId
-      },
-      subscription_data: {
-        metadata: {
-          userId: decoded.userId.toString()
-        }
-      }
-    })
-
-    // Store checkout session in database
-    await db.collection('checkout_sessions').insertOne({
-      sessionId: session.id,
+    const monthlyAIRequests = await db.collection('ai_requests').countDocuments({
       userId: decoded.userId,
-      priceId: priceId,
-      customerId: customerId,
-      status: 'pending',
+      createdAt: {
+        $gte: new Date(currentYear, currentMonth, 1),
+        $lt: new Date(currentYear, currentMonth + 1, 1)
+      }
+    })
+
+    // Define AI limits based on plan with proper typing
+    const aiLimits: Record<PlanType, number> = {
+      basic: 50,
+      pro: 500,
+      enterprise: -1 // unlimited
+    }
+
+    // Safely cast user plan with fallback
+    const userPlan: PlanType = (user.plan as PlanType) || 'basic'
+    const limit = aiLimits[userPlan]
+
+    if (limit !== -1 && monthlyAIRequests >= limit) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Monthly AI request limit reached',
+          limit: limit,
+          used: monthlyAIRequests
+        },
+        { status: 429 }
+      )
+    }
+
+    // Process AI request based on type
+    let aiResponse = ''
+    
+    switch (type) {
+      case 'content_generation':
+        aiResponse = generateContent(prompt, context)
+        break
+      case 'seo_optimization':
+        aiResponse = generateSEOContent(prompt, context)
+        break
+      case 'product_description':
+        aiResponse = generateProductDescription(prompt, context)
+        break
+      case 'website_copy':
+        aiResponse = generateWebsiteCopy(prompt, context)
+        break
+      default:
+        aiResponse = generateGenericResponse(prompt, context)
+    }
+
+    // Store AI request in database
+    const aiRequest = {
+      userId: decoded.userId,
+      prompt: prompt,
+      type: type,
+      context: context || null,
+      response: aiResponse,
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-    })
+      plan: userPlan
+    }
+
+    const insertResult = await db.collection('ai_requests').insertOne(aiRequest)
+
+    // Update user's AI usage statistics
+    await db.collection('users').updateOne(
+      { _id: decoded.userId },
+      { 
+        $inc: { totalAIRequests: 1 },
+        $set: { lastAIRequestAt: new Date() }
+      }
+    )
 
     return NextResponse.json({
       success: true,
-      sessionId: session.id,
-      url: session.url,
-      message: 'Checkout session created successfully'
+      requestId: insertResult.insertedId,
+      response: aiResponse,
+      type: type,
+      usage: {
+        used: monthlyAIRequests + 1,
+        limit: limit,
+        plan: userPlan
+      },
+      message: 'AI request processed successfully'
     })
 
   } catch (error) {
-    console.error('Stripe checkout error:', error)
+    console.error('AI request error:', error)
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
     
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Failed to create checkout session',
+        error: 'Failed to process AI request',
         details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       },
       { status: 500 }
@@ -128,78 +154,31 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const sessionId = searchParams.get('session_id')
-
-    if (!sessionId) {
-      return NextResponse.json(
-        { success: false, error: 'Session ID is required' },
-        { status: 400 }
-      )
-    }
-
-    // Get token from cookie
-    const token = request.cookies.get('auth-token')?.value
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid token' },
-        { status: 401 }
-      )
-    }
-
-    // Retrieve checkout session from Stripe
-    const session = await stripe.checkout.sessions.retrieve(sessionId)
-
-    // Connect to database
-    const client = await connectToDatabase()
-    const db = client.db('affilify')
-
-    // Update session status in database
-    await db.collection('checkout_sessions').updateOne(
-      { sessionId: sessionId, userId: decoded.userId },
-      { 
-        $set: { 
-          status: session.payment_status,
-          updatedAt: new Date()
-        }
-      }
-    )
-
-    return NextResponse.json({
-      success: true,
-      session: {
-        id: session.id,
-        payment_status: session.payment_status,
-        customer_email: session.customer_details?.email,
-        amount_total: session.amount_total,
-        currency: session.currency
-      }
-    })
-
-  } catch (error) {
-    console.error('Retrieve checkout session error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to retrieve checkout session',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
-      { status: 500 }
-    )
-  }
+// Helper functions for different AI response types
+function generateContent(prompt: string, context: any): string {
+  return `Generated content for: ${prompt}. This is a mock AI response that would normally be generated by an AI service like OpenAI GPT or Google Gemini. The content would be tailored based on the prompt and context provided.`
 }
+
+function generateSEOContent(prompt: string, context: any): string {
+  return `SEO-optimized content for: ${prompt}. This would include keyword-rich content, meta descriptions, title tags, and other SEO elements optimized for search engines.`
+}
+
+function generateProductDescription(prompt: string, context: any): string {
+  return `Product description for: ${prompt}. This would be a compelling, conversion-focused description highlighting key features, benefits, and unique selling points of the product.`
+}
+
+function generateWebsiteCopy(prompt: string, context: any): string {
+  return `Website copy for: ${prompt}. This would include headlines, subheadings, body text, call-to-action buttons, and other website elements designed to convert visitors into customers.`
+}
+
+function generateGenericResponse(prompt: string, context: any): string {
+  return `AI response for: ${prompt}. This is a general-purpose AI response that would be generated based on the specific prompt and any additional context provided.`
+}
+
+export async function GET() {
+  return NextResponse.json(
+    { success: false, error: 'Method not allowed. Use POST to make AI requests.' },
+    { status: 405 }
+  )
+}
+
