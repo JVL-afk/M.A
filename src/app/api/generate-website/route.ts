@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '../../../lib/mongodb'
 import jwt from 'jsonwebtoken'
 
+// Define the plan type for better type safety
+type PlanType = 'basic' | 'pro' | 'enterprise'
+
 export async function POST(request: NextRequest) {
   try {
     const { affiliateLink, productName, niche, template, customization } = await request.json()
@@ -57,15 +60,16 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    // Define limits based on plan
-    const planLimits = {
+    // Define limits based on plan with proper typing
+    const planLimits: Record<PlanType, number> = {
       basic: 5,
       pro: 25,
       enterprise: -1 // unlimited
     }
 
-    const userPlan = user.plan || 'basic'
-    const limit = planLimits[userPlan] || planLimits.basic
+    // Ensure userPlan is a valid PlanType
+    const userPlan: PlanType = (user.plan as PlanType) || 'basic'
+    const limit = planLimits[userPlan]
 
     if (limit !== -1 && monthlyWebsites >= limit) {
       return NextResponse.json(
@@ -216,5 +220,3 @@ export async function GET() {
     { status: 405 }
   )
 }
-
-
