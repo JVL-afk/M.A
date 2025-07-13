@@ -3,11 +3,8 @@ import { connectToDatabase } from '../../../../lib/mongodb'
 import jwt from 'jsonwebtoken'
 import Stripe from 'stripe'
 
-// Initialize Stripe with compatible API version
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  // Use a stable API version that's compatible with the Stripe library
-  apiVersion: '2024-06-20',
-})
+// Initialize Stripe without specifying API version to use the default
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
 
 export async function POST(request: NextRequest) {
   try {
@@ -206,3 +203,4 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
