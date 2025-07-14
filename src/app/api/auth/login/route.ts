@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '../../../../lib/mongodb'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { ObjectId } from 'mongodb'
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json()
 
-    // Validate input
+    // Validate required fields
     if (!email || !password) {
       return NextResponse.json(
         { success: false, error: 'Email and password are required' },
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid email format' },
+        { success: false, error: 'Please enter a valid email address' },
         { status: 400 }
       )
     }
@@ -29,7 +30,10 @@ export async function POST(request: NextRequest) {
     const db = client.db('affilify')
 
     // Find user by email
-    const user = await db.collection('users').findOne({ email })
+    const user = await db.collection('users').findOne({ 
+      email: email.toLowerCase() 
+    })
+    
     if (!user) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password' },
@@ -37,21 +41,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if user is verified
-    if (!user.isVerified) {
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Please verify your email before logging in',
-          needsVerification: true,
-          email: email
-        },
-        { status: 403 }
-      )
-    }
-
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password)
+    
     if (!isPasswordValid) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password' },
@@ -59,10 +51,16 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Update last login
+    await db.collection('users').updateOne(
+      { _id: user._id },
+      { $set: { lastLogin: new Date() } }
+    )
+
     // Generate JWT token
     const token = jwt.sign(
       { 
-        userId: user._id,
+        userId: user._id.toString(),
         email: user.email,
         plan: user.plan || 'basic'
       },
@@ -70,29 +68,17 @@ export async function POST(request: NextRequest) {
       { expiresIn: '7d' }
     )
 
-    // Update last login
-    await db.collection('users').updateOne(
-      { _id: user._id },
-      { 
-        $set: { 
-          lastLoginAt: new Date(),
-          lastActiveAt: new Date()
-        }
-      }
-    )
-
     // Create response
     const response = NextResponse.json({
       success: true,
-      message: 'Login successful',
+      message: 'Login successful!',
       user: {
         id: user._id,
-        email: user.email,
         name: user.name,
+        email: user.email,
         plan: user.plan || 'basic',
-        isVerified: user.isVerified,
-        createdAt: user.createdAt,
-        lastLoginAt: new Date()
+        isVerified: user.isVerified || false,
+        websitesCreated: user.websitesCreated || 0
       }
     })
 
@@ -109,13 +95,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Login error:', error)
     
-    // Proper error type handling for TypeScript
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
     
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Login failed',
+        error: 'Login failed. Please try again.',
         details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       },
       { status: 500 }
@@ -123,9 +108,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
-  return NextResponse.json(
-    { success: false, error: 'Method not allowed. Use POST to login.' },
-    { status: 405 }
-  )
-}
