@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { connectToDatabase } from '../../../../lib/mongodb'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { ObjectId } from 'mongodb'
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name, confirmPassword } = await request.json()
+    const { name, email, password } = await request.json()
 
-    // Validate input
-    if (!email || !password || !name) {
+    // Validate required fields
+    if (!name || !email || !password) {
       return NextResponse.json(
-        { success: false, error: 'Email, password, and name are required' },
+        { success: false, error: 'Name, email, and password are required' },
         { status: 400 }
       )
     }
@@ -19,23 +20,23 @@ export async function POST(request: NextRequest) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid email format' },
+        { success: false, error: 'Please enter a valid email address' },
         { status: 400 }
       )
     }
 
     // Validate password strength
-    if (password.length < 8) {
+    if (password.length < 6) {
       return NextResponse.json(
-        { success: false, error: 'Password must be at least 8 characters long' },
+        { success: false, error: 'Password must be at least 6 characters long' },
         { status: 400 }
       )
     }
 
-    // Check password confirmation
-    if (confirmPassword && password !== confirmPassword) {
+    // Validate name length
+    if (name.trim().length < 2) {
       return NextResponse.json(
-        { success: false, error: 'Passwords do not match' },
+        { success: false, error: 'Name must be at least 2 characters long' },
         { status: 400 }
       )
     }
@@ -45,10 +46,13 @@ export async function POST(request: NextRequest) {
     const db = client.db('affilify')
 
     // Check if user already exists
-    const existingUser = await db.collection('users').findOne({ email })
+    const existingUser = await db.collection('users').findOne({ 
+      email: email.toLowerCase() 
+    })
+    
     if (existingUser) {
       return NextResponse.json(
-        { success: false, error: 'User with this email already exists' },
+        { success: false, error: 'An account with this email already exists' },
         { status: 409 }
       )
     }
@@ -57,61 +61,55 @@ export async function POST(request: NextRequest) {
     const saltRounds = 12
     const hashedPassword = await bcrypt.hash(password, saltRounds)
 
-    // Generate verification code
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString()
-
     // Create user object
     const newUser = {
+      name: name.trim(),
       email: email.toLowerCase(),
       password: hashedPassword,
-      name: name.trim(),
       plan: 'basic',
       isVerified: false,
-      verificationCode: verificationCode,
-      verificationCodeExpires: new Date(Date.now() + 15 * 60 * 1000), // 15 minutes
       createdAt: new Date(),
-      updatedAt: new Date(),
-      lastActiveAt: new Date(),
-      totalWebsites: 0,
-      totalAnalyses: 0,
-      totalRevenue: 0,
-      totalClicks: 0
+      lastLogin: null,
+      websitesCreated: 0,
+      apiUsage: 0,
+      stripeCustomerId: null
     }
 
     // Insert user into database
     const insertResult = await db.collection('users').insertOne(newUser)
+    
+    if (!insertResult.insertedId) {
+      return NextResponse.json(
+        { success: false, error: 'Failed to create account. Please try again.' },
+        { status: 500 }
+      )
+    }
 
-    // Generate JWT token for immediate login (optional)
+    // Generate JWT token
     const token = jwt.sign(
       { 
-        userId: insertResult.insertedId,
-        email: newUser.email,
-        plan: newUser.plan
+        userId: insertResult.insertedId.toString(),
+        email: email.toLowerCase(),
+        plan: 'basic'
       },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '7d' }
     )
 
-    // In a real implementation, you would send verification email here
-    // For now, we'll just log the verification code
-    console.log(`Verification code for ${email}: ${verificationCode}`)
-
     // Create response
     const response = NextResponse.json({
       success: true,
-      message: 'Account created successfully. Please check your email for verification code.',
+      message: 'Account created successfully!',
       user: {
         id: insertResult.insertedId,
-        email: newUser.email,
-        name: newUser.name,
-        plan: newUser.plan,
-        isVerified: newUser.isVerified,
-        createdAt: newUser.createdAt
-      },
-      verificationRequired: true
+        name: name.trim(),
+        email: email.toLowerCase(),
+        plan: 'basic',
+        isVerified: false
+      }
     })
 
-    // Set HTTP-only cookie (optional - for immediate login)
+    // Set HTTP-only cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -124,23 +122,15 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Signup error:', error)
     
-    // Proper error type handling for TypeScript
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
     
     return NextResponse.json(
       { 
         success: false, 
-        error: 'Account creation failed',
+        error: 'Failed to create account. Please try again.',
         details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
       },
       { status: 500 }
     )
   }
-}
-
-export async function GET() {
-  return NextResponse.json(
-    { success: false, error: 'Method not allowed. Use POST to create account.' },
-    { status: 405 }
-  )
 }
