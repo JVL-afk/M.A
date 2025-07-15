@@ -4,15 +4,14 @@ import Link from 'next/link';
 import jwt from 'jsonwebtoken';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { LogoutButton } from './LogoutButton'; // We'll create this small client component
+import { LogoutButton } from './LogoutButton'; // We created this small client component
 
-// --- 1. Secure Server-Side Data Fetching ---
+// --- 1. Secure Server-Side Data Fetching (Corrected) ---
 async function getDashboardData() {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
 
   if (!token) {
-    // No token, definitely not logged in.
     return null;
   }
 
@@ -23,7 +22,6 @@ async function getDashboardData() {
     const client = await connectToDatabase();
     const db = client.db('affilify');
     
-    // Fetch user and analytics data in parallel for speed
     const [user, analytics] = await Promise.all([
       db.collection('users').findOne({ _id: new ObjectId(decoded.userId) }, { projection: { password: 0 } }),
       db.collection('analytics').aggregate([
@@ -32,7 +30,7 @@ async function getDashboardData() {
             _id: "$userId",
             totalClicks: { $sum: { $cond: [{ $eq: ["$eventType", "click"] }, 1, 0] } },
             totalConversions: { $sum: { $cond: [{ $eq: ["$eventType", "conversion"] }, 1, 0] } },
-            totalRevenue: { $sum: "$data.revenue" }
+            totalRevenue: { $sum: { $ifNull: ["$data.revenue", 0] } }
         }}
       ]).next()
     ]);
@@ -41,8 +39,10 @@ async function getDashboardData() {
 
     const totalWebsiteGenerations = await db.collection('generated_websites').countDocuments({ userId: user._id });
 
-    // Combine all data into a single object
-    const conversionRate = analytics?.totalClicks > 0 ? ((analytics.totalConversions / analytics.totalClicks) * 100).toFixed(2) : '0.00';
+    // Safely calculate conversionRate, checking if analytics and its properties exist.
+    const conversionRate = (analytics && analytics.totalClicks > 0) 
+      ? ((analytics.totalConversions / analytics.totalClicks) * 100).toFixed(2) 
+      : '0.00';
 
     return {
       user,
@@ -152,4 +152,5 @@ export default async function DashboardPage() {
     </div>
   );
 }
+
 
