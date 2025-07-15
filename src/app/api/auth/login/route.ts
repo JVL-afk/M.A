@@ -1,110 +1,78 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '../../../../lib/mongodb'
-import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
-import { ObjectId } from 'mongodb'
+import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '@/lib/mongodb';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password } = await request.json()
+    // --- 1. Get User Credentials ---
+    const { email, password } = await request.json();
 
-    // Validate required fields
     if (!email || !password) {
       return NextResponse.json(
-        { success: false, error: 'Email and password are required' },
+        { success: false, error: 'Email and password are required.' },
         { status: 400 }
-      )
+      );
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
-      return NextResponse.json(
-        { success: false, error: 'Please enter a valid email address' },
-        { status: 400 }
-      )
-    }
+    // --- 2. Connect to Database ---
+    const client = await connectToDatabase();
+    const db = client.db('affilify');
+    const usersCollection = db.collection('users');
 
-    // Connect to database
-    const client = await connectToDatabase()
-    const db = client.db('affilify')
-
-    // Find user by email
-    const user = await db.collection('users').findOne({ 
-      email: email.toLowerCase() 
-    })
-    
+    // --- 3. Find User ---
+    const user = await usersCollection.findOne({ email: email.toLowerCase() });
     if (!user) {
       return NextResponse.json(
-        { success: false, error: 'Invalid email or password' },
-        { status: 401 }
-      )
+        { success: false, error: 'Invalid credentials. Please check your email and password.' },
+        { status: 401 } // Unauthorized
+      );
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password)
-    
-    if (!isPasswordValid) {
+    // --- 4. Compare Passwords ---
+    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    if (!isPasswordMatch) {
       return NextResponse.json(
-        { success: false, error: 'Invalid email or password' },
+        { success: false, error: 'Invalid credentials. Please check your email and password.' },
         { status: 401 }
-      )
+      );
     }
 
-    // Update last login
-    await db.collection('users').updateOne(
-      { _id: user._id },
-      { $set: { lastLogin: new Date() } }
-    )
-
-    // Generate JWT token
+    // --- 5. Generate JWT Token (THE CRITICAL FIX) ---
     const token = jwt.sign(
-      { 
-        userId: user._id.toString(),
-        email: user.email,
-        plan: user.plan || 'basic'
-      },
-      process.env.JWT_SECRET || 'your-secret-key',
+      { userId: user._id, email: user.email },
+      process.env.JWT_SECRET || 'your-default-secret-key-for-development',
       { expiresIn: '7d' }
-    )
+    );
 
-    // Create response
+    // --- 6. Update Last Login and Create Response (THE SECOND CRITICAL FIX) ---
+    await usersCollection.updateOne(
+      { _id: user._id },
+      { $set: { lastLoginAt: new Date() } }
+    );
+
     const response = NextResponse.json({
       success: true,
       message: 'Login successful!',
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        plan: user.plan || 'basic',
-        isVerified: user.isVerified || false,
-        websitesCreated: user.websitesCreated || 0
-      }
-    })
+    });
 
-    // Set HTTP-only cookie
+    // Set the token in a secure, HttpOnly cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 // 7 days
-    })
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    } );
 
-    return response
+    return response;
 
   } catch (error) {
-    console.error('Login error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
+    console.error('LOGIN_ERROR:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
     return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Login failed. Please try again.',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
+      { success: false, error: 'An internal server error occurred.', details: errorMessage },
       { status: 500 }
-    )
+    );
   }
 }
-
