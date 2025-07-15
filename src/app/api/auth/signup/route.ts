@@ -1,212 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '../../../../lib/mongodb'
+import { connectToDatabase } from '../../../lib/mongodb'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { ObjectId } from 'mongodb'
 
+// This function will handle the signup request.
 export async function POST(request: NextRequest) {
   try {
-    // Log the incoming request for debugging
-    console.log('=== SIGNUP REQUEST DEBUG ===')
-    console.log('Request method:', request.method)
-    console.log('Request headers:', Object.fromEntries(request.headers.entries()))
-    
-    // Parse request body
-    let requestBody
-    try {
-      requestBody = await request.json()
-      console.log('Request body received:', requestBody)
-    } catch (parseError) {
-      console.error('Failed to parse request body:', parseError)
+    // --- 1. Get User Data ---
+    // Tries to parse JSON, falls back to form data if it fails.
+    let data;
+    const contentType = request.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await request.json();
+    } else {
+      const formData = await request.formData();
+      data = Object.fromEntries(formData.entries());
+    }
+
+    const { name, email, password } = data;
+
+    // --- 2. Validate Input ---
+    if (!email || !password || !name) {
       return NextResponse.json(
-        { success: false, error: 'Invalid JSON in request body' },
+        { success: false, error: 'Name, email, and password are required.' },
         { status: 400 }
       )
     }
 
-    // Extract fields with multiple possible names to handle frontend variations
-    const name = requestBody.name || requestBody.fullName || requestBody.firstName
-    const email = requestBody.email || requestBody.emailAddress
-    const password = requestBody.password
-    const confirmPassword = requestBody.confirmPassword
-
-    console.log('Extracted fields:', { 
-      name: name ? 'present' : 'missing', 
-      email: email ? 'present' : 'missing', 
-      password: password ? 'present' : 'missing',
-      confirmPassword: confirmPassword ? 'present' : 'missing'
-    })
-
-    // Validate required fields
-    if (!name || !email || !password) {
-      console.log('Validation failed - missing fields:', {
-        name: !name ? 'MISSING' : 'OK',
-        email: !email ? 'MISSING' : 'OK',
-        password: !password ? 'MISSING' : 'OK'
-      })
-      
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Name, email, and password are required',
-          debug: {
-            receivedFields: Object.keys(requestBody),
-            missingFields: [
-              !name && 'name',
-              !email && 'email', 
-              !password && 'password'
-            ].filter(Boolean)
-          }
-        },
-        { status: 400 }
-      )
-    }
-
-    // Validate password confirmation if provided
-    if (confirmPassword && password !== confirmPassword) {
-      console.log('Password confirmation mismatch')
-      return NextResponse.json(
-        { success: false, error: 'Passwords do not match' },
-        { status: 400 }
-      )
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(email)) {
-      console.log('Invalid email format:', email)
-      return NextResponse.json(
-        { success: false, error: 'Please enter a valid email address' },
-        { status: 400 }
-      )
-    }
-
-    // Validate password strength
     if (password.length < 6) {
-      console.log('Password too short:', password.length)
       return NextResponse.json(
-        { success: false, error: 'Password must be at least 6 characters long' },
+        { success: false, error: 'Password must be at least 6 characters long.' },
         { status: 400 }
       )
     }
 
-    // Validate name length
-    if (name.trim().length < 2) {
-      console.log('Name too short:', name.trim().length)
-      return NextResponse.json(
-        { success: false, error: 'Name must be at least 2 characters long' },
-        { status: 400 }
-      )
-    }
-
-    console.log('All validations passed, connecting to database...')
-
-    // Connect to database
+    // --- 3. Connect to Database ---
     const client = await connectToDatabase()
     const db = client.db('affilify')
+    const usersCollection = db.collection('users')
 
-    console.log('Database connected, checking for existing user...')
-
-    // Check if user already exists
-    const existingUser = await db.collection('users').findOne({ 
-      email: email.toLowerCase() 
-    })
-    
+    // --- 4. Check for Existing User ---
+    const existingUser = await usersCollection.findOne({ email: email.toLowerCase() })
     if (existingUser) {
-      console.log('User already exists with email:', email.toLowerCase())
       return NextResponse.json(
-        { success: false, error: 'An account with this email already exists' },
-        { status: 409 }
+        { success: false, error: 'An account with this email already exists.' },
+        { status: 409 } // 409 Conflict is more appropriate here
       )
     }
 
-    console.log('No existing user found, hashing password...')
+    // --- 5. Hash Password ---
+    const hashedPassword = await bcrypt.hash(password, 10)
 
-    // Hash password
-    const saltRounds = 12
-    const hashedPassword = await bcrypt.hash(password, saltRounds)
-
-    console.log('Password hashed, creating user object...')
-
-    // Create user object
+    // --- 6. Create New User in Database ---
     const newUser = {
-      name: name.trim(),
+      _id: new ObjectId(),
+      name: name,
       email: email.toLowerCase(),
       password: hashedPassword,
       plan: 'basic',
-      isVerified: false,
+      isVerified: false, // Or true if you have an email verification flow
       createdAt: new Date(),
-      lastLogin: null,
-      websitesCreated: 0,
-      apiUsage: 0,
-      stripeCustomerId: null
+      updatedAt: new Date(),
+      lastLoginAt: new Date(),
     }
 
-    console.log('Inserting user into database...')
+    const result = await usersCollection.insertOne(newUser)
 
-    // Insert user into database
-    const insertResult = await db.collection('users').insertOne(newUser)
-    
-    if (!insertResult.insertedId) {
-      console.error('Failed to insert user into database')
-      return NextResponse.json(
-        { success: false, error: 'Failed to create account. Please try again.' },
-        { status: 500 }
-      )
-    }
-
-    console.log('User created successfully with ID:', insertResult.insertedId)
-
-    // Generate JWT token
+    // --- 7. Generate JWT Token ---
+    // This is the critical step for logging the user in right after signup.
     const token = jwt.sign(
-      { 
-        userId: insertResult.insertedId.toString(),
-        email: email.toLowerCase(),
-        plan: 'basic'
-      },
-      process.env.JWT_SECRET || 'your-secret-key',
-      { expiresIn: '7d' }
+      { userId: result.insertedId, email: newUser.email },
+      process.env.JWT_SECRET || 'your-default-secret-key-for-development',
+      { expiresIn: '7d' } // Token expires in 7 days
     )
 
-    console.log('JWT token generated, creating response...')
-
-    // Create response
+    // --- 8. Create Response and Set Cookie ---
     const response = NextResponse.json({
       success: true,
-      message: 'Account created successfully!',
-      user: {
-        id: insertResult.insertedId,
-        name: name.trim(),
-        email: email.toLowerCase(),
-        plan: 'basic',
-        isVerified: false
-      }
-    })
+      message: 'Signup successful!',
+      userId: result.insertedId,
+    }, { status: 201 }); // 201 Created is more appropriate
 
-    // Set HTTP-only cookie
+    // Set the token in a secure, HttpOnly cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 // 7 days
-    })
+      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+      sameSite: 'lax', // Or 'strict' for more security
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days in seconds
+    } );
 
-    console.log('=== SIGNUP SUCCESS ===')
-    return response
+    console.log('SIGNUP SUCCESS: User created and auth cookie set.');
+    return response;
 
   } catch (error) {
-    console.error('=== SIGNUP ERROR ===')
-    console.error('Error details:', error)
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace')
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
+    // --- 9. Comprehensive Error Handling ---
+    console.error('SIGNUP_ERROR:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.'
     return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to create account. Please try again.',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
+      { success: false, error: 'Failed to create account.', details: errorMessage },
       { status: 500 }
     )
   }
