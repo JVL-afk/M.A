@@ -1,139 +1,48 @@
-// Authentication Middleware
-// File: src/middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
-import { NextRequest, NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
-
-// Define protected routes
-const protectedRoutes = [
-  '/dashboard',
-  '/api/dashboard',
-  '/api/generate-website',
-  '/api/analyze-website',
-  '/api/user',
-  '/api/analytics'
-];
-
-// Define admin routes (if needed)
-const adminRoutes = [
-  '/admin'
-];
-
-// Define public routes that should redirect to dashboard if authenticated
-const publicRoutes = [
-  '/login',
-  '/signup'
-];
-
+// This function is the middleware
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // --- 1. Define Public and Protected Routes ---
+  const publicPaths = ['/login', '/signup', '/about', '/pricing', '/features', '/docs', '/'];
+  const apiAuthPaths = ['/api/auth/login', '/api/auth/signup'];
+  
+  // Check if the current path is a public page or an auth API endpoint
+  const isPublicPath = publicPaths.includes(pathname) || apiAuthPaths.includes(pathname);
+
+  // --- 2. Get the Authentication Token ---
   const token = request.cookies.get('auth-token')?.value;
 
-  // Check if the route is protected
-  const isProtectedRoute = protectedRoutes.some(route => 
-    pathname.startsWith(route)
-  );
+  // --- 3. Redirect Logic ---
 
-  // Check if the route is public (login/signup)
-  const isPublicRoute = publicRoutes.some(route => 
-    pathname.startsWith(route)
-  );
-
-  // Check if the route is admin
-  const isAdminRoute = adminRoutes.some(route => 
-    pathname.startsWith(route)
-  );
-
-  // Handle protected routes
-  if (isProtectedRoute) {
-    if (!token) {
-      // Redirect to login for web pages, return 401 for API routes
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json(
-          { error: 'Authentication required' },
-          { status: 401 }
-        );
-      } else {
-        return NextResponse.redirect(new URL('/login', request.url));
-      }
+  // If the user has a token and is trying to access a public page (like /login),
+  // redirect them to the dashboard. They are already logged in.
+  if (token && publicPaths.includes(pathname)) {
+    // Exception: Allow access to the root path ('/') even if logged in.
+    if (pathname === '/') {
+      return NextResponse.next();
     }
-
-    try {
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any;
-      
-      // Add user info to headers for API routes
-      if (pathname.startsWith('/api/')) {
-        const requestHeaders = new Headers(request.headers);
-        requestHeaders.set('x-user-id', decoded.userId);
-        requestHeaders.set('x-user-email', decoded.email);
-
-        return NextResponse.next({
-          request: {
-            headers: requestHeaders,
-          },
-        });
-      }
-
-    } catch (error) {
-      // Invalid token
-      if (pathname.startsWith('/api/')) {
-        return NextResponse.json(
-          { error: 'Invalid authentication token' },
-          { status: 401 }
-        );
-      } else {
-        // Clear invalid token and redirect to login
-        const response = NextResponse.redirect(new URL('/login', request.url));
-        response.cookies.set('auth-token', '', { maxAge: 0 });
-        return response;
-      }
-    }
+    return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Handle public routes (redirect to dashboard if already authenticated)
-  if (isPublicRoute && token) {
-    try {
-      jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-      return NextResponse.redirect(new URL('/dashboard', request.url));
-    } catch (error) {
-      // Invalid token, clear it and continue
-      const response = NextResponse.next();
-      response.cookies.set('auth-token', '', { maxAge: 0 });
-      return response;
-    }
+  // If the user does NOT have a token and is trying to access a protected page,
+  // redirect them to the login page.
+  if (!token && !isPublicPath) {
+    return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  // Handle admin routes (additional admin check would go here)
-  if (isAdminRoute) {
-    if (!token) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
-
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any;
-      
-      // TODO: Add admin role check here
-      // For now, all authenticated users can access admin (change this in production)
-      
-    } catch (error) {
-      return NextResponse.redirect(new URL('/login', request.url));
-    }
-  }
-
+  // --- 4. Allow Request to Proceed ---
+  // If none of the above conditions are met, the request is valid.
   return NextResponse.next();
 }
 
-// Configure which routes the middleware should run on
+// --- 5. Matcher Configuration ---
+// This tells the middleware which paths to run on.
+// We exclude static files and image optimization routes.
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!_next/static|_next/image|favicon.ico|public/).*)',
+    '/((?!api/|_next/static|_next/image|favicon.ico).*)',
   ],
 };
