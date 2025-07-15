@@ -16,28 +16,16 @@ export async function POST(request: NextRequest) {
       data = Object.fromEntries(formData.entries());
     }
 
-    // --- 2. Validate Input (FINAL, MOST ROBUST VERSION) ---
-    const { name, fullName, email, password, confirmPassword, password_confirmation } = data;
+    // --- 2. Validate Input (SIMPLIFIED - NO CONFIRMATION CHECK) ---
+    const { name, fullName, email, password } = data;
 
     const finalName = name || fullName;
-    // This is the key fix: check for multiple common names for the confirmation field.
-    const finalConfirmPassword = confirmPassword || password_confirmation;
 
     if (!email || !password || !finalName) {
       return NextResponse.json(
         { success: false, error: 'Full Name, email, and password are required.' },
         { status: 400 }
       );
-    }
-    
-    // The final check
-    if (password !== finalConfirmPassword) {
-        // For debugging, let's see what the server is receiving.
-        console.log('Password Mismatch Details:', { password, finalConfirmPassword, receivedData: data });
-        return NextResponse.json(
-            { success: false, error: 'Passwords do not match. Please ensure both fields are identical.' },
-            { status: 400 }
-        );
     }
 
     if (password.length < 6) {
