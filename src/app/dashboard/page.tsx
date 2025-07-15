@@ -4,9 +4,9 @@ import Link from 'next/link';
 import jwt from 'jsonwebtoken';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
-import { LogoutButton } from './LogoutButton'; // We created this small client component
+import { LogoutButton } from './LogoutButton';
 
-// --- 1. Secure Server-Side Data Fetching (Corrected) ---
+// --- 1. Secure Server-Side Data Fetching ---
 async function getDashboardData() {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
@@ -39,7 +39,6 @@ async function getDashboardData() {
 
     const totalWebsiteGenerations = await db.collection('generated_websites').countDocuments({ userId: user._id });
 
-    // Safely calculate conversionRate, checking if analytics and its properties exist.
     const conversionRate = (analytics && analytics.totalClicks > 0) 
       ? ((analytics.totalConversions / analytics.totalClicks) * 100).toFixed(2) 
       : '0.00';
@@ -62,7 +61,7 @@ async function getDashboardData() {
 }
 
 
-// --- 2. The Merged Dashboard Page Component ---
+// --- 2. The Merged Dashboard Page Component (with the final fix) ---
 export default async function DashboardPage() {
   const data = await getDashboardData();
 
@@ -71,7 +70,10 @@ export default async function DashboardPage() {
   }
 
   const { user, stats } = data;
-  const userFirstName = user.name.split(' ')[0];
+
+  // --- THIS IS THE CORRECTED LINE ---
+  // It safely handles cases where user.name might be missing.
+  const userFirstName = user.name ? user.name.split(' ')[0] : 'User';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-orange-600 to-black text-white">
@@ -152,5 +154,6 @@ export default async function DashboardPage() {
     </div>
   );
 }
+
 
 
