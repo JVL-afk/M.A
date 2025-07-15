@@ -5,8 +5,7 @@ import jwt from 'jsonwebtoken';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
 
-// --- 1. The Server Action ---
-// This function runs securely on the server when the form is submitted.
+// --- 1. The Server Action (Corrected Return Types) ---
 async function generateWebsiteAction(formData: FormData) {
   'use server'; // This directive marks it as a Server Action
 
@@ -14,14 +13,14 @@ async function generateWebsiteAction(formData: FormData) {
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
   if (!token) {
-    return { success: false, error: 'Unauthorized: Please log in again.' };
+    redirect('/login'); // Redirect if not authenticated
   }
 
   let decoded: { userId: string };
   try {
     decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-default-secret-key-for-development') as { userId: string };
   } catch (error) {
-    return { success: false, error: 'Invalid token.' };
+    redirect('/login?error=invalid_token'); // Redirect on bad token
   }
 
   // --- B. Get Form Data ---
@@ -29,7 +28,8 @@ async function generateWebsiteAction(formData: FormData) {
   const productName = formData.get('productName') as string | null;
 
   if (!affiliateLink) {
-    return { success: false, error: 'Affiliate Link is required.' };
+    // Redirect back to the form with an error query parameter
+    redirect('/dashboard/create-website?error=link_required');
   }
 
   // --- C. Connect to DB and Get User ---
@@ -38,12 +38,10 @@ async function generateWebsiteAction(formData: FormData) {
   const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
 
   if (!user) {
-    return { success: false, error: 'User not found.' };
+    redirect('/login?error=user_not_found');
   }
   
   // --- D. (Placeholder) AI Generation Logic ---
-  // In a real app, you would call your Gemini/Mistral API here.
-  // For now, we'll simulate a successful generation.
   console.log(`Generating website for ${user.email} with link: ${affiliateLink}`);
   const generatedContent = `<html><body><h1>Welcome to the ${productName || 'Awesome Product'} website!</h1><a href="${affiliateLink}">Buy Now!</a></body></html>`;
   const newSubdomain = `site-${Date.now()}`;
@@ -54,19 +52,23 @@ async function generateWebsiteAction(formData: FormData) {
     name: productName || 'My New Website',
     affiliateLink,
     subdomain: newSubdomain,
-    content: generatedContent, // Storing the generated HTML
+    content: generatedContent,
     createdAt: new Date(),
   });
 
-  // --- F. Redirect to a success page or the new site ---
-  // After successful generation, we redirect the user.
+  // --- F. Redirect to a success page ---
   redirect(`/dashboard/my-websites?success=true`);
 }
 
 
-// --- 2. The Page Component ---
-// This is a simple Server Component that displays the form.
-export default function CreateWebsitePage() {
+// --- 2. The Page Component (with Error Message Display) ---
+// We add searchParams to read the error from the URL
+export default function CreateWebsitePage({ searchParams }: { searchParams?: { error?: string } }) {
+  
+  const errorMessage = searchParams?.error === 'link_required' 
+    ? 'Affiliate Link is a required field.' 
+    : null;
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-orange-800 text-white">
       <div className="w-full max-w-lg p-8 space-y-6 bg-black/30 backdrop-blur-sm rounded-xl border border-purple-500/20">
@@ -75,7 +77,6 @@ export default function CreateWebsitePage() {
           <p className="text-orange-200 mt-2">Generate a professional affiliate website in seconds using AI</p>
         </div>
         
-        {/* The form now calls the Server Action directly */}
         <form action={generateWebsiteAction} className="space-y-6">
           <div>
             <label htmlFor="affiliateLink" className="block text-sm font-medium text-purple-300">
@@ -89,7 +90,6 @@ export default function CreateWebsitePage() {
               className="mt-1 block w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
               placeholder="https://your-affiliate-link.com"
             />
-            <p className="mt-1 text-xs text-gray-400">Enter the affiliate link you want to promote</p>
           </div>
 
           <div>
@@ -103,8 +103,14 @@ export default function CreateWebsitePage() {
               className="mt-1 block w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
               placeholder="e.g., The Ultimate Productivity Planner"
             />
-            <p className="mt-1 text-xs text-gray-400">Specify the product name for better AI generation (optional)</p>
           </div>
+
+          {/* Display error message right above the button */}
+          {errorMessage && (
+            <div className="p-3 bg-red-900/50 border border-red-500 rounded-md text-center">
+              <p className="text-red-300">{errorMessage}</p>
+            </div>
+          )}
 
           <div>
             <button
@@ -125,3 +131,5 @@ export default function CreateWebsitePage() {
     </div>
   );
 }
+
+
