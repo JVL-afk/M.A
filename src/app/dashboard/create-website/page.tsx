@@ -1,268 +1,127 @@
-'use client'
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import jwt from 'jsonwebtoken';
+import { connectToDatabase } from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import dynamic from 'next/dynamic'
+// --- 1. The Server Action ---
+// This function runs securely on the server when the form is submitted.
+async function generateWebsiteAction(formData: FormData) {
+  'use server'; // This directive marks it as a Server Action
 
-// Create a client-only component to handle localStorage
-const ClientOnlyCreateWebsite = dynamic(() => Promise.resolve(CreateWebsiteClient), {
-  ssr: false,
-  loading: () => (
-    <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black flex items-center justify-center">
-      <div className="text-white text-xl">Loading...</div>
-    </div>
-  )
-})
-
-function CreateWebsiteClient() {
-  const [affiliateLink, setAffiliateLink] = useState('')
-  const [productName, setProductName] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [result, setResult] = useState<any>(null)
-  const [error, setError] = useState('')
-  const [userEmail, setUserEmail] = useState('')
-  const [isClient, setIsClient] = useState(false)
-  const router = useRouter()
-
-  // Ensure we're on the client side
-  useEffect(() => {
-    setIsClient(true)
-    
-    // Safe localStorage access only after client-side hydration
-    if (typeof window !== 'undefined') {
-      const storedEmail = localStorage.getItem('userEmail')
-      if (storedEmail) {
-        setUserEmail(storedEmail)
-      } else {
-        // Check if user is authenticated via other means
-        // For now, we'll allow the form to be shown
-        setUserEmail('demo@example.com') // Fallback for demo
-      }
-    }
-  }, [])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError('')
-    setResult(null)
-
-    if (!affiliateLink) {
-      setError('Please enter an affiliate link.')
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      const response = await fetch('/api/generate-website', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          affiliateLink: affiliateLink,
-          productName: productName || 'Product',
-          userEmail: userEmail || 'demo@example.com'
-        }),
-      })
-
-      const data = await response.json()
-
-      if (data.success) {
-        setResult(data.website)
-        setError('')
-      } else {
-        setError(data.error || 'Failed to generate website')
-      }
-    } catch (err: any) {
-      setError('Error: ' + (err.message || 'Network error'))
-    } finally {
-      setIsLoading(false)
-    }
+  // --- A. Authentication ---
+  const cookieStore = cookies();
+  const token = cookieStore.get('auth-token')?.value;
+  if (!token) {
+    return { success: false, error: 'Unauthorized: Please log in again.' };
   }
 
-  const handleStoreWebsite = async () => {
-    if (!result) {
-      alert('No website generated.')
-      return
-    }
-
-    setIsLoading(true)
-
-    try {
-      const storeResponse = await fetch('/api/store-website', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userEmail: userEmail || 'demo@example.com',
-          website: result,
-        }),
-      })
-
-      const storeData = await storeResponse.json()
-
-      if (storeData.success) {
-        alert('Website stored successfully!')
-        if (typeof window !== 'undefined') {
-          router.push('/dashboard/my-websites')
-        }
-      } else {
-        alert('Failed to store website: ' + (storeData.error || 'Unknown error'))
-      }
-    } catch (err: any) {
-      alert('Error storing website: ' + (err.message || 'Network error'))
-    } finally {
-      setIsLoading(false)
-    }
+  let decoded: { userId: string };
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-default-secret-key-for-development') as { userId: string };
+  } catch (error) {
+    return { success: false, error: 'Invalid token.' };
   }
 
-  // Don't render until client-side
-  if (!isClient) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
-      </div>
-    )
+  // --- B. Get Form Data ---
+  const affiliateLink = formData.get('affiliateLink') as string;
+  const productName = formData.get('productName') as string | null;
+
+  if (!affiliateLink) {
+    return { success: false, error: 'Affiliate Link is required.' };
   }
 
+  // --- C. Connect to DB and Get User ---
+  const client = await connectToDatabase();
+  const db = client.db('affilify');
+  const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
+
+  if (!user) {
+    return { success: false, error: 'User not found.' };
+  }
+  
+  // --- D. (Placeholder) AI Generation Logic ---
+  // In a real app, you would call your Gemini/Mistral API here.
+  // For now, we'll simulate a successful generation.
+  console.log(`Generating website for ${user.email} with link: ${affiliateLink}`);
+  const generatedContent = `<html><body><h1>Welcome to the ${productName || 'Awesome Product'} website!</h1><a href="${affiliateLink}">Buy Now!</a></body></html>`;
+  const newSubdomain = `site-${Date.now()}`;
+
+  // --- E. Store the New Website in the Database ---
+  await db.collection('generated_websites').insertOne({
+    userId: user._id,
+    name: productName || 'My New Website',
+    affiliateLink,
+    subdomain: newSubdomain,
+    content: generatedContent, // Storing the generated HTML
+    createdAt: new Date(),
+  });
+
+  // --- F. Redirect to a success page or the new site ---
+  // After successful generation, we redirect the user.
+  redirect(`/dashboard/my-websites?success=true`);
+}
+
+
+// --- 2. The Page Component ---
+// This is a simple Server Component that displays the form.
+export default function CreateWebsitePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black">
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-white mb-4">
-              Create AI-Powered Affiliate Website
-            </h1>
-            <p className="text-xl text-orange-200">
-              Generate a professional affiliate website in seconds using AI
-            </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-orange-800 text-white">
+      <div className="w-full max-w-lg p-8 space-y-6 bg-black/30 backdrop-blur-sm rounded-xl border border-purple-500/20">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold">Create AI-Powered Affiliate Website</h1>
+          <p className="text-orange-200 mt-2">Generate a professional affiliate website in seconds using AI</p>
+        </div>
+        
+        {/* The form now calls the Server Action directly */}
+        <form action={generateWebsiteAction} className="space-y-6">
+          <div>
+            <label htmlFor="affiliateLink" className="block text-sm font-medium text-purple-300">
+              Affiliate Link *
+            </label>
+            <input
+              id="affiliateLink"
+              name="affiliateLink"
+              type="url"
+              required
+              className="mt-1 block w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+              placeholder="https://your-affiliate-link.com"
+            />
+            <p className="mt-1 text-xs text-gray-400">Enter the affiliate link you want to promote</p>
           </div>
 
-          {/* Form */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8 mb-8">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div>
-                <label className="block text-white text-lg font-semibold mb-2">
-                  Affiliate Link *
-                </label>
-                <input
-                  type="url"
-                  value={affiliateLink}
-                  onChange={(e) => setAffiliateLink(e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500"
-                  placeholder="https://example.com/affiliate-link"
-                  required
-                />
-                <p className="text-orange-200 text-sm mt-2">
-                  Enter the affiliate link you want to promote
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-white text-lg font-semibold mb-2">
-                  Product Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-red-500"
-                  placeholder="e.g., iPhone 15 Pro, Nike Air Max, etc."
-                />
-                <p className="text-orange-200 text-sm mt-2">
-                  Specify the product name for better AI generation (optional)
-                </p>
-              </div>
-
-              {error && (
-                <div className="bg-red-500/20 text-red-200 p-4 rounded-lg">
-                  {error}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-lg font-semibold text-lg btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoading ? 'Generating Website...' : 'Generate Website with AI'}
-              </button>
-            </form>
+          <div>
+            <label htmlFor="productName" className="block text-sm font-medium text-purple-300">
+              Product Name (Optional )
+            </label>
+            <input
+              id="productName"
+              name="productName"
+              type="text"
+              className="mt-1 block w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+              placeholder="e.g., The Ultimate Productivity Planner"
+            />
+            <p className="mt-1 text-xs text-gray-400">Specify the product name for better AI generation (optional)</p>
           </div>
 
-          {/* Result */}
-          {result && (
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-white">Generated Website</h2>
-                <button
-                  onClick={handleStoreWebsite}
-                  disabled={isLoading}
-                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold btn-hover disabled:opacity-50"
-                >
-                  {isLoading ? 'Storing...' : 'Store Website'}
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Title:</h3>
-                  <p className="text-orange-100 bg-white/5 p-3 rounded">{result.title || 'Generated Website'}</p>
-                </div>
-
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Description:</h3>
-                  <p className="text-orange-100 bg-white/5 p-3 rounded">{result.description || 'AI-generated description'}</p>
-                </div>
-
-                {result.sections && result.sections.length > 0 && (
-                  <div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Content Sections:</h3>
-                    <div className="space-y-2">
-                      {result.sections.map((section: any, index: number) => (
-                        <div key={index} className="bg-white/5 p-3 rounded">
-                          <h4 className="font-semibold text-white">{section.title || `Section ${index + 1}`}</h4>
-                          <p className="text-orange-100 text-sm">{section.content || 'Generated content'}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Affiliate Link:</h3>
-                  <a 
-                    href={result.affiliateLink || affiliateLink} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-300 hover:text-blue-200 bg-white/5 p-3 rounded block break-all"
-                  >
-                    {result.affiliateLink || affiliateLink}
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Navigation */}
-          <div className="text-center mt-8">
-            <Link 
-              href="/dashboard" 
-              className="text-orange-300 hover:text-orange-200 font-semibold"
+          <div>
+            <button
+              type="submit"
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 transition-colors"
             >
-              ← Back to Dashboard
-            </Link>
+              Generate Website with AI
+            </button>
           </div>
+        </form>
+
+        <div className="text-center">
+          <Link href="/dashboard" className="text-sm text-purple-300 hover:text-orange-200">
+            &larr; Back to Dashboard
+          </Link>
         </div>
       </div>
     </div>
-  )
-}
-
-export default function CreateWebsite() {
-  return <ClientOnlyCreateWebsite />
+  );
 }
