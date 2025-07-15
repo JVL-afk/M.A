@@ -1,115 +1,155 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import jwt from 'jsonwebtoken';
 import { connectToDatabase } from '@/lib/mongodb';
 import { ObjectId } from 'mongodb';
+import { LogoutButton } from './LogoutButton'; // We'll create this small client component
 
-// This is the new function to get data directly on the server.
+// --- 1. Secure Server-Side Data Fetching ---
 async function getDashboardData() {
-  // 1. Get the token from the cookies.
   const cookieStore = cookies();
   const token = cookieStore.get('auth-token')?.value;
 
-  // If no token, redirect to login. This is a failsafe.
   if (!token) {
+    // No token, definitely not logged in.
     return null;
   }
 
   try {
-    // 2. Verify the token.
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-default-secret-key-for-development') as { userId: string };
-    if (!decoded.userId) {
-      return null;
-    }
+    if (!decoded.userId) return null;
 
-    // 3. Fetch user data directly from the database.
     const client = await connectToDatabase();
     const db = client.db('affilify');
     
-    const user = await db.collection('users').findOne(
-      { _id: new ObjectId(decoded.userId) },
-      { projection: { password: 0 } } // Don't send the password hash
-    );
+    // Fetch user and analytics data in parallel for speed
+    const [user, analytics] = await Promise.all([
+      db.collection('users').findOne({ _id: new ObjectId(decoded.userId) }, { projection: { password: 0 } }),
+      db.collection('analytics').aggregate([
+        { $match: { userId: new ObjectId(decoded.userId) } },
+        { $group: {
+            _id: "$userId",
+            totalClicks: { $sum: { $cond: [{ $eq: ["$eventType", "click"] }, 1, 0] } },
+            totalConversions: { $sum: { $cond: [{ $eq: ["$eventType", "conversion"] }, 1, 0] } },
+            totalRevenue: { $sum: "$data.revenue" }
+        }}
+      ]).next()
+    ]);
 
-    if (!user) {
-      return null;
-    }
+    if (!user) return null;
 
-    // 4. Fetch user's websites (or other stats)
-    const websites = await db.collection('generated_websites').find({ userId: user._id }).limit(10).toArray();
+    const totalWebsiteGenerations = await db.collection('generated_websites').countDocuments({ userId: user._id });
 
-    // Return all the data the dashboard needs.
-    return { user, websites };
+    // Combine all data into a single object
+    const conversionRate = analytics?.totalClicks > 0 ? ((analytics.totalConversions / analytics.totalClicks) * 100).toFixed(2) : '0.00';
+
+    return {
+      user,
+      stats: {
+        totalWebsiteGenerations,
+        totalClicks: analytics?.totalClicks || 0,
+        totalRevenue: analytics?.totalRevenue || 0,
+        totalConversions: analytics?.totalConversions || 0,
+        conversionRate: conversionRate,
+      }
+    };
 
   } catch (error) {
     console.error('Dashboard data fetching error:', error);
-    // If token is invalid or any other error occurs, return null.
     return null;
   }
 }
 
 
-// This is the main Dashboard Page component.
-// It is now an 'async' component, which makes it a Server Component.
+// --- 2. The Merged Dashboard Page Component ---
 export default async function DashboardPage() {
   const data = await getDashboardData();
 
-  // If data fetching failed (e.g., bad token), redirect to login.
   if (!data) {
     redirect('/login');
   }
 
-  const { user, websites } = data;
+  const { user, stats } = data;
+  const userFirstName = user.name.split(' ')[0];
 
   return (
-    <div className="container mx-auto p-6 bg-gray-900 text-white min-h-screen">
-      <h1 className="text-4xl font-bold mb-4">Welcome back, {user.name}!</h1>
-      <p className="text-lg text-gray-400 mb-8">Here's a summary of your affiliate empire.</p>
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-orange-600 to-black text-white">
+      {/* Header */}
+      <header className="bg-black/20 backdrop-blur-sm p-4 border-b border-orange-500/20">
+        <div className="container mx-auto flex justify-between items-center">
+          <h1 className="text-2xl font-bold">AFFILIFY</h1>
+          <div className="flex items-center space-x-4">
+            <span className="text-orange-200">Welcome, {userFirstName}!</span>
+            <LogoutButton />
+          </div>
+        </div>
+      </header>
 
-      {/* Stats Section */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-gray-400 text-sm font-medium">Total Websites</h3>
-          <p className="text-3xl font-semibold">{websites.length}</p>
-        </div>
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-gray-400 text-sm font-medium">Plan</h3>
-          <p className="text-3xl font-semibold capitalize">{user.plan}</p>
-        </div>
-        <div className="bg-gray-800 p-6 rounded-lg">
-          <h3 className="text-gray-400 text-sm font-medium">Member Since</h3>
-          <p className="text-3xl font-semibold">{new Date(user.createdAt).toLocaleDateString()}</p>
-        </div>
-      </div>
+      {/* Main Content */}
+      <main className="container mx-auto p-8">
+        <h2 className="text-4xl font-bold mb-2">Welcome back, {userFirstName}! 👋</h2>
+        <p className="text-orange-200 text-lg mb-8">You have {stats.totalWebsiteGenerations} websites generating ${stats.totalRevenue.toFixed(2)} in revenue!</p>
 
-      {/* Recent Websites Section */}
-      <div>
-        <h2 className="text-2xl font-bold mb-4">Your Recent Websites</h2>
-        <div className="bg-gray-800 rounded-lg overflow-hidden">
-          {websites.length > 0 ? (
-            <ul className="divide-y divide-gray-700">
-              {websites.map((site) => (
-                <li key={site._id.toString()} className="p-4 flex justify-between items-center hover:bg-gray-700 transition-colors">
-                  <div>
-                    <p className="font-semibold">{site.name || 'Untitled Website'}</p>
-                    <a href={`https://${site.subdomain}.affilify.eu`} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-400 hover:underline">
-                      {`https://${site.subdomain}.affilify.eu`}
-                    </a>
-                  </div>
-                  <span className="text-xs text-gray-400">{new Date(site.createdAt ).toLocaleDateString()}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="p-10 text-center">
-              <p className="text-gray-400">You haven't created any websites yet.</p>
-              <a href="/dashboard/create-website" className="mt-4 inline-block bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
-                Create Your First Website
-              </a>
-            </div>
-          )}
+        {/* Analytics Overview */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-black/30 backdrop-blur-sm p-6 rounded-xl border border-purple-500/20 flex flex-col justify-between">
+            <h3 className="text-purple-300 text-lg font-semibold mb-2">Total Websites</h3>
+            <p className="text-4xl font-bold text-white">{stats.totalWebsiteGenerations}</p>
+            <p className="text-sm text-orange-200">0 active</p>
+          </div>
+          <div className="bg-black/30 backdrop-blur-sm p-6 rounded-xl border border-purple-500/20 flex flex-col justify-between">
+            <h3 className="text-purple-300 text-lg font-semibold mb-2">Total Clicks</h3>
+            <p className="text-4xl font-bold text-white">{stats.totalClicks}</p>
+            <p className="text-sm text-orange-200">0 this week</p>
+          </div>
+          <div className="bg-black/30 backdrop-blur-sm p-6 rounded-xl border border-purple-500/20 flex flex-col justify-between">
+            <h3 className="text-purple-300 text-lg font-semibold mb-2">Revenue</h3>
+            <p className="text-4xl font-bold text-white">${stats.totalRevenue.toFixed(2)}</p>
+            <p className="text-sm text-orange-200">$0.00 this week</p>
+          </div>
+          <div className="bg-black/30 backdrop-blur-sm p-6 rounded-xl border border-purple-500/20 flex flex-col justify-between">
+            <h3 className="text-purple-300 text-lg font-semibold mb-2">Conversion Rate</h3>
+            <p className="text-4xl font-bold text-white">{stats.conversionRate}%</p>
+            <p className="text-sm text-orange-200">{stats.totalConversions} conversions</p>
+          </div>
         </div>
-      </div>
+
+        {/* Quick Actions */}
+        <h3 className="text-2xl font-bold mb-4">Quick Actions</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <Link href="/dashboard/create-website" className="bg-orange-600 hover:bg-orange-700 rounded-xl p-6 transition-all duration-200 block">
+                <h4 className="text-xl font-semibold text-white">Create Website</h4>
+                <p className="text-orange-200">Generate a new affiliate website with AI</p>
+            </Link>
+            <Link href="/dashboard/analyze-website" className="bg-purple-600 hover:bg-purple-700 rounded-xl p-6 transition-all duration-200 block">
+                <h4 className="text-xl font-semibold text-white">Analyze Website</h4>
+                <p className="text-purple-200">Get AI insights on any website</p>
+            </Link>
+            <Link href="/dashboard/my-websites" className="bg-green-600 hover:bg-green-700 rounded-xl p-6 transition-all duration-200 block">
+                <h4 className="text-xl font-semibold text-white">My Websites</h4>
+                <p className="text-green-200">View and manage your affiliate sites</p>
+            </Link>
+        </div>
+
+        {/* Account Info */}
+        <h3 className="text-2xl font-bold mb-4">Account Info</h3>
+        <div className="bg-black/30 backdrop-blur-sm p-6 rounded-xl border border-purple-500/20 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <p className="text-purple-300 font-semibold">Email</p>
+            <p className="text-white">{user.email}</p>
+          </div>
+          <div>
+            <p className="text-purple-300 font-semibold">Member Since</p>
+            <p className="text-white">{new Date(user.createdAt).toLocaleDateString()}</p>
+          </div>
+          <div>
+            <p className="text-purple-300 font-semibold">Last Active</p>
+            <p className="text-white">{new Date(user.lastLoginAt).toLocaleString()}</p>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
+
