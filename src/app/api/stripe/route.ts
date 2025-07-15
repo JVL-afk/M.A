@@ -1,235 +1,73 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '../../../lib/mongodb'
-import jwt from 'jsonwebtoken'
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import jwt from 'jsonwebtoken';
+import { Stripe } from 'stripe';
+import { connectToDatabase } from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2024-06-20', // Use a specific, stable API version
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const { plan, priceId, successUrl, cancelUrl } = await request.json()
+    // 1. Authenticate the user
+    const token = cookies().get('auth-token')?.value;
+    if (!token) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    if (!decoded.userId) {
+      return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 401 });
+    }
+
+    // 2. Get the plan from the request body
+    const { plan, priceId } = await request.json();
     if (!plan || !priceId) {
-      return NextResponse.json(
-        { success: false, error: 'Plan and price ID are required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ success: false, error: 'Plan and Price ID are required' }, { status: 400 });
     }
 
-    // Get token from cookie
-    const token = request.cookies.get('auth-token')?.value
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
+    // 3. Get user from database to pass to Stripe
+    const client = await connectToDatabase();
+    const db = client.db('affilify');
+    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
 
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid token' },
-        { status: 401 }
-      )
-    }
-
-    // Connect to database
-    const client = await connectToDatabase()
-    const db = client.db('affilify')
-
-    // Get user information
-    const user = await db.collection('users').findOne({ _id: decoded.userId })
     if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+      return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
 
-    // Validate plan
-    const validPlans = ['pro', 'enterprise']
-    if (!validPlans.includes(plan)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid plan selected' },
-        { status: 400 }
-      )
-    }
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-    // Check if user already has this plan or higher
-    if (user.plan === plan || (user.plan === 'enterprise' && plan === 'pro')) {
-      return NextResponse.json(
-        { success: false, error: 'You already have this plan or a higher one' },
-        { status: 400 }
-      )
-    }
-
-    // For demo purposes, we'll simulate a successful payment
-    // In a real implementation, you would:
-    // 1. Create a Stripe checkout session
-    // 2. Handle the payment flow
-    // 3. Update user plan after successful payment
-
-    // Simulate payment processing
-    const paymentSession = {
-      id: `cs_${Date.now()}`,
-      url: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/success?session_id=cs_${Date.now()}`,
-      status: 'open',
-      plan: plan,
-      priceId: priceId,
-      amount: plan === 'pro' ? 2900 : 9900, // $29 or $99
-      currency: 'usd'
-    }
-
-    // Store payment intent in database
-    await db.collection('payment_sessions').insertOne({
-      sessionId: paymentSession.id,
-      userId: decoded.userId,
-      plan: plan,
-      priceId: priceId,
-      amount: paymentSession.amount,
-      currency: paymentSession.currency,
-      status: 'pending',
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
-    })
-
-    return NextResponse.json({
-      success: true,
-      message: 'Payment session created successfully',
-      session: {
-        id: paymentSession.id,
-        url: paymentSession.url,
+    // 4. Create a real Stripe Checkout Session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: priceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'subscription',
+      success_url: `${appUrl}/dashboard?payment_success=true`,
+      cancel_url: `${appUrl}/pricing?payment_canceled=true`,
+      customer_email: user.email, // Pre-fill the customer's email
+      metadata: {
+        userId: user._id.toString( ), // Pass the user ID to the webhook
         plan: plan,
-        amount: paymentSession.amount,
-        currency: paymentSession.currency
-      }
-    })
+      },
+    });
+
+    if (!session.url) {
+        return NextResponse.json({ success: false, error: 'Failed to create Stripe session.' }, { status: 500 });
+    }
+
+    // 5. Return the session URL for redirection
+    return NextResponse.json({ success: true, url: session.url });
 
   } catch (error) {
-    console.error('Stripe checkout error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to create payment session',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
-      { status: 500 }
-    )
-  }
-}
-
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const sessionId = searchParams.get('session_id')
-
-    if (!sessionId) {
-      return NextResponse.json(
-        { success: false, error: 'Session ID is required' },
-        { status: 400 }
-      )
-    }
-
-    // Get token from cookie
-    const token = request.cookies.get('auth-token')?.value
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized' },
-        { status: 401 }
-      )
-    }
-
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid token' },
-        { status: 401 }
-      )
-    }
-
-    // Connect to database
-    const client = await connectToDatabase()
-    const db = client.db('affilify')
-
-    // Get payment session
-    const paymentSession = await db.collection('payment_sessions').findOne({
-      sessionId: sessionId,
-      userId: decoded.userId
-    })
-
-    if (!paymentSession) {
-      return NextResponse.json(
-        { success: false, error: 'Payment session not found' },
-        { status: 404 }
-      )
-    }
-
-    // For demo purposes, mark as completed and upgrade user
-    if (paymentSession.status === 'pending') {
-      // Update payment session
-      await db.collection('payment_sessions').updateOne(
-        { sessionId: sessionId },
-        { 
-          $set: { 
-            status: 'completed',
-            completedAt: new Date()
-          }
-        }
-      )
-
-      // Upgrade user plan
-      await db.collection('users').updateOne(
-        { _id: decoded.userId },
-        { 
-          $set: { 
-            plan: paymentSession.plan,
-            planUpgradedAt: new Date(),
-            updatedAt: new Date()
-          }
-        }
-      )
-
-      // Log upgrade event
-      await db.collection('user_events').insertOne({
-        userId: decoded.userId,
-        event: 'plan_upgraded',
-        timestamp: new Date(),
-        metadata: {
-          fromPlan: 'basic',
-          toPlan: paymentSession.plan,
-          amount: paymentSession.amount,
-          sessionId: sessionId
-        }
-      })
-    }
-
-    return NextResponse.json({
-      success: true,
-      session: {
-        id: paymentSession.sessionId,
-        status: 'completed',
-        plan: paymentSession.plan,
-        amount: paymentSession.amount,
-        completedAt: new Date()
-      }
-    })
-
-  } catch (error) {
-    console.error('Get payment session error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Failed to retrieve payment session',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
-      { status: 500 }
-    )
+    console.error('Stripe session creation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An internal server error occurred.';
+    return NextResponse.json({ success: false, error: errorMessage }, { status: 500 });
   }
 }
