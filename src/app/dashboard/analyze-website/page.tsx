@@ -1,113 +1,141 @@
-"use client";
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
+import jwt from 'jsonwebtoken';
 
-import { useState, useEffect } from 'react';
+// --- 1. The Server Action ---
+// This runs securely on the server.
+async function analyzeWebsiteAction(formData: FormData) {
+  'use server';
 
-// This is the PUBLIC URL of your REAL backend service
-const BACKEND_API_URL = 'http://45.32.73.36:3000/api/analyze-website';
+  // --- A. Authentication ---
+  const token = cookies().get('auth-token')?.value;
+  if (!token) {
+    redirect('/login');
+  }
 
-interface AnalysisResult {
-  url: string;
-  [key: string]: any; // Allow any other fields
+  try {
+    jwt.verify(token, process.env.JWT_SECRET!);
+  } catch (error) {
+    redirect('/login?error=invalid_token');
+  }
+
+  // --- B. Get Form Data ---
+  const urlToAnalyze = formData.get('urlToAnalyze') as string;
+  if (!urlToAnalyze) {
+    redirect('/dashboard/analyze-website?error=url_required');
+  }
+
+  // --- C. Call Google PageSpeed API ---
+  // This is the core logic for the analysis.
+  const googleApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(urlToAnalyze )}&key=${process.env.PAGESPEED_API_KEY}`;
+
+  try {
+    const response = await fetch(googleApiUrl);
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('PageSpeed API Error:', errorData);
+      redirect(`/dashboard/analyze-website?error=${encodeURIComponent(errorData.error.message)}`);
+    }
+    const data = await response.json();
+    
+    // Extract key metrics
+    const performanceScore = data.lighthouseResult.categories.performance.score * 100;
+    const firstContentfulPaint = data.lighthouseResult.audits['first-contentful-paint'].displayValue;
+    const speedIndex = data.lighthouseResult.audits['speed-index'].displayValue;
+    
+    // Encode results to pass them safely in the URL
+    const results = { performanceScore, firstContentfulPaint, speedIndex };
+    const encodedResults = encodeURIComponent(JSON.stringify(results));
+
+    // --- D. Redirect back with results ---
+    redirect(`/dashboard/analyze-website?results=${encodedResults}`);
+
+  } catch (error) {
+    console.error('Failed to fetch from PageSpeed API:', error);
+    redirect('/dashboard/analyze-website?error=api_fetch_failed');
+  }
 }
 
-export default function AnalyzeWebsite( ) {
-  const [websiteUrl, setWebsiteUrl] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    setAnalysis(null);
-
+// --- 2. The Page Component ---
+// It now displays results passed via searchParams.
+export default function AnalyzeWebsitePage({ searchParams }: { searchParams?: { error?: string; results?: string } }) {
+  
+  let results = null;
+  if (searchParams?.results) {
     try {
-      // This fetch call is now made DIRECTLY from the browser to the backend
-      const response = await fetch(BACKEND_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: websiteUrl,
-        }),
-      });
-
-      if (!response.ok) {
-        // Try to get a meaningful error from the backend response
-        const errorText = await response.text();
-        throw new Error(`Analysis server returned an error: ${response.status} ${response.statusText}. Details: ${errorText}`);
-      }
-
-      const data = await response.json();
-
-      if (data.success) {
-        setAnalysis(data.analysis);
-      } else {
-        setError(data.error || 'Failed to analyze website. Please try again.');
-      }
-    } catch (err: any) {
-      console.error("Analysis submission error:", err);
-      setError('An unexpected error occurred: ' + err.message);
-    } finally {
-      setIsLoading(false);
+      results = JSON.parse(decodeURIComponent(searchParams.results));
+    } catch {
+      // Ignore malformed results
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-orange-600 to-black text-white p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-6 text-center">Analyze a Website's Performance</h1>
-        <p className="text-center text-orange-200 mb-8">
-          Enter any website URL to get a comprehensive analysis powered by AI and Google PageSpeed Insights.
-        </p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-orange-800 text-white">
+      <div className="w-full max-w-2xl p-8 space-y-6">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold">Analyze a Website's Performance</h1>
+          <p className="text-orange-200 mt-2">Enter any website URL to get a comprehensive analysis powered by AI and Google PageSpeed Insights.</p>
+        </div>
         
-        <form onSubmit={handleSubmit} className="space-y-4 mb-8 bg-black/30 p-6 rounded-xl">
-          <div>
-            <label htmlFor="websiteUrl" className="block text-sm font-medium mb-2 text-purple-300">
-              Website URL to Analyze
-            </label>
-            <input
-              id="websiteUrl"
-              type="url"
-              value={websiteUrl}
-              onChange={(e) => setWebsiteUrl(e.target.value)}
-              placeholder="https://example.com"
-              className="w-full p-3 bg-gray-800 border border-purple-500/50 rounded-lg text-white focus:ring-orange-500 focus:border-orange-500"
-              required
-            />
-          </div>
-          
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-300"
-          >
-            {isLoading ? 'Analyzing, please wait (this can take up to a minute )...' : 'Analyze Website'}
-          </button>
-        </form>
-
-        {error && (
-          <div className="mt-4 p-4 bg-red-900/50 border border-red-500 text-red-200 rounded-lg">
-            <p className="font-bold">Analysis Failed</p>
-            <p>{error}</p>
-          </div>
-        )}
-
-        {analysis && (
-          <div className="mt-6 space-y-6 animate-fade-in">
-            <div className="bg-green-900/50 border border-green-500 text-green-200 p-4 rounded-lg">
-              <h3 className="font-bold text-lg mb-2">Analysis Complete!</h3>
-              <p>Website: <a href={analysis.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">{analysis.url}</a></p>
+        <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-purple-500/20 p-8">
+          <form action={analyzeWebsiteAction} className="space-y-4">
+            <div>
+              <label htmlFor="urlToAnalyze" className="block text-sm font-medium text-purple-300 mb-1">
+                Website URL to Analyze
+              </label>
+              <input
+                id="urlToAnalyze"
+                name="urlToAnalyze"
+                type="url"
+                required
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
+                placeholder="https://www.amazon.com"
+              />
             </div>
+            <button
+              type="submit"
+              className="w-full py-3 px-4 border border-transparent rounded-md text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 transition-colors"
+            >
+              Analyze Website
+            </button>
+          </form>
+        </div>
 
-            <div className="bg-black/30 p-6 rounded-xl">
-              <h4 className="font-semibold text-lg mb-3 text-purple-300">Full Analysis Report:</h4>
-              <pre className="text-sm text-white bg-gray-900 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap break-words">
-                {JSON.stringify(analysis, null, 2)}
-              </pre>
+        {/* Results Display */}
+        {results && (
+          <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-green-500/20 p-8 mt-6">
+            <h2 className="text-2xl font-bold text-center mb-4">Analysis Results</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+              <div>
+                <p className="text-lg text-green-300">Performance Score</p>
+                <p className="text-4xl font-bold">{results.performanceScore.toFixed(0 )}</p>
+              </div>
+              <div>
+                <p className="text-lg text-green-300">First Contentful Paint</p>
+                <p className="text-4xl font-bold">{results.firstContentfulPaint}</p>
+              </div>
+              <div>
+                <p className="text-lg text-green-300">Speed Index</p>
+                <p className="text-4xl font-bold">{results.speedIndex}</p>
+              </div>
             </div>
           </div>
         )}
+
+        {/* Error Display */}
+        {searchParams?.error && (
+            <div className="bg-red-900/50 border border-red-500 rounded-md text-center p-4 mt-6">
+              <p className="font-bold text-red-300">Analysis Failed</p>
+              <p className="text-red-400">{decodeURIComponent(searchParams.error)}</p>
+            </div>
+        )}
+
+        <div className="text-center mt-6">
+          <Link href="/dashboard" className="text-sm text-purple-300 hover:text-orange-200">
+            &larr; Back to Dashboard
+          </Link>
+        </div>
       </div>
     </div>
   );
