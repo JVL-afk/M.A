@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/mongodb'
+import { connectToDatabase } from '@/lib/mongodb' // Using absolute path
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { ObjectId } from 'mongodb'
 
-// This function will handle the signup request.
 export async function POST(request: NextRequest) {
   try {
     // --- 1. Get User Data ---
-    // Tries to parse JSON, falls back to form data if it fails.
     let data;
     const contentType = request.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
@@ -18,14 +16,25 @@ export async function POST(request: NextRequest) {
       data = Object.fromEntries(formData.entries());
     }
 
-    const { name, email, password } = data;
+    // --- 2. Validate Input (The FIX is here) ---
+    // Destructure all possible name fields and the rest
+    const { name, fullName, email, password, confirmPassword } = data;
 
-    // --- 2. Validate Input ---
-    if (!email || !password || !name) {
+    // Use whichever name field is available
+    const finalName = name || fullName;
+
+    if (!email || !password || !finalName) {
       return NextResponse.json(
-        { success: false, error: 'Name, email, and password are required.' },
+        { success: false, error: 'Full Name, email, and password are required.' },
         { status: 400 }
       )
+    }
+    
+    if (password !== confirmPassword) {
+        return NextResponse.json(
+            { success: false, error: 'Passwords do not match.' },
+            { status: 400 }
+        )
     }
 
     if (password.length < 6) {
@@ -45,7 +54,7 @@ export async function POST(request: NextRequest) {
     if (existingUser) {
       return NextResponse.json(
         { success: false, error: 'An account with this email already exists.' },
-        { status: 409 } // 409 Conflict is more appropriate here
+        { status: 409 }
       )
     }
 
@@ -55,11 +64,11 @@ export async function POST(request: NextRequest) {
     // --- 6. Create New User in Database ---
     const newUser = {
       _id: new ObjectId(),
-      name: name,
+      name: finalName, // Use the validated name
       email: email.toLowerCase(),
       password: hashedPassword,
       plan: 'basic',
-      isVerified: false, // Or true if you have an email verification flow
+      isVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
       lastLoginAt: new Date(),
@@ -68,11 +77,10 @@ export async function POST(request: NextRequest) {
     const result = await usersCollection.insertOne(newUser)
 
     // --- 7. Generate JWT Token ---
-    // This is the critical step for logging the user in right after signup.
     const token = jwt.sign(
       { userId: result.insertedId, email: newUser.email },
       process.env.JWT_SECRET || 'your-default-secret-key-for-development',
-      { expiresIn: '7d' } // Token expires in 7 days
+      { expiresIn: '7d' }
     )
 
     // --- 8. Create Response and Set Cookie ---
@@ -80,15 +88,14 @@ export async function POST(request: NextRequest) {
       success: true,
       message: 'Signup successful!',
       userId: result.insertedId,
-    }, { status: 201 }); // 201 Created is more appropriate
+    }, { status: 201 });
 
-    // Set the token in a secure, HttpOnly cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-      sameSite: 'lax', // Or 'strict' for more security
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7 days in seconds
+      maxAge: 60 * 60 * 24 * 7, // 7 days
     } );
 
     console.log('SIGNUP SUCCESS: User created and auth cookie set.');
@@ -104,3 +111,4 @@ export async function POST(request: NextRequest) {
     )
   }
 }
+
