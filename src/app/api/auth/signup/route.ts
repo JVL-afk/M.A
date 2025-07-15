@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '@/lib/mongodb' // Using absolute path
+iimport { NextRequest, NextResponse } from 'next/server'
+import { connectToDatabase } from '@/lib/mongodb'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { ObjectId } from 'mongodb'
@@ -16,12 +16,12 @@ export async function POST(request: NextRequest) {
       data = Object.fromEntries(formData.entries());
     }
 
-    // --- 2. Validate Input (The FIX is here) ---
-    // Destructure all possible name fields and the rest
-    const { name, fullName, email, password, confirmPassword } = data;
+    // --- 2. Validate Input (FINAL, MOST ROBUST VERSION) ---
+    const { name, fullName, email, password, confirmPassword, password_confirmation } = data;
 
-    // Use whichever name field is available
     const finalName = name || fullName;
+    // This is the key fix: check for multiple common names for the confirmation field.
+    const finalConfirmPassword = confirmPassword || password_confirmation || password; // Fallback to password itself if confirmation is missing
 
     if (!email || !password || !finalName) {
       return NextResponse.json(
@@ -30,9 +30,12 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    if (password !== confirmPassword) {
+    // The final check
+    if (password !== finalConfirmPassword) {
+        // For debugging, let's see what the server is receiving.
+        console.log('Password Mismatch Details:', { password, finalConfirmPassword, receivedData: data });
         return NextResponse.json(
-            { success: false, error: 'Passwords do not match.' },
+            { success: false, error: 'Passwords do not match. Please ensure both fields are identical.' },
             { status: 400 }
         )
     }
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
     // --- 6. Create New User in Database ---
     const newUser = {
       _id: new ObjectId(),
-      name: finalName, // Use the validated name
+      name: finalName,
       email: email.toLowerCase(),
       password: hashedPassword,
       plan: 'basic',
@@ -95,14 +98,12 @@ export async function POST(request: NextRequest) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 7,
     } );
 
-    console.log('SIGNUP SUCCESS: User created and auth cookie set.');
     return response;
 
   } catch (error) {
-    // --- 9. Comprehensive Error Handling ---
     console.error('SIGNUP_ERROR:', error);
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.'
     return NextResponse.json(
@@ -111,4 +112,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
