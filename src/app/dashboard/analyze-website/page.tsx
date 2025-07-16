@@ -1,146 +1,140 @@
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import Link from 'next/link';
 import jwt from 'jsonwebtoken';
+import { connectToDatabase } from '@/lib/mongodb';
+import { ObjectId } from 'mongodb';
 
-// --- 1. The Server Action ---
-// This runs securely on the server.
+// Server Action for analyzing websites
 async function analyzeWebsiteAction(formData: FormData) {
   'use server';
-
-  // --- A. Authentication ---
-  const token = cookies().get('auth-token')?.value;
-  if (!token) {
-    redirect('/login');
-  }
-
+  
   try {
-    jwt.verify(token, process.env.JWT_SECRET!);
-  } catch (error) {
-    redirect('/login?error=invalid_token');
-  }
-
-  // --- B. Get Form Data ---
-  const urlToAnalyze = formData.get('urlToAnalyze') as string;
-  if (!urlToAnalyze) {
-    redirect('/dashboard/analyze-website?error=url_required');
-  }
-
-  // --- C. Call Google PageSpeed API ---
-  // This is the core logic for the analysis.
-  const googleApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(urlToAnalyze)}&key=${process.env.PAGESPEED_API_KEY}`;
-
-  try {
-    const response = await fetch(googleApiUrl);
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('PageSpeed API Error:', errorData);
-      redirect(`/dashboard/analyze-website?error=${encodeURIComponent(errorData.error.message)}`);
+    const url = formData.get('url') as string;
+    
+    if (!url) {
+      return { success: false, error: 'URL is required' };
     }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch {
+      return { success: false, error: 'Please enter a valid URL' };
+    }
+
+    // Get user from auth token
+    const token = cookies().get('auth-token')?.value;
+    if (!token) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    const client = await connectToDatabase();
+    const db = client.db('affilify');
+    
+    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    // Call Google PageSpeed API
+    const pagespeedUrl = `https://www.googleapis.com/pagespeed/v5/runPagespeed?url=${encodeURIComponent(url)}&key=${process.env.PAGESPEED_API_KEY}&category=performance&category=accessibility&category=best-practices&category=seo`;
+    
+    const response = await fetch(pagespeedUrl);
+    if (!response.ok) {
+      throw new Error(`PageSpeed API error: ${response.status}`);
+    }
+
     const data = await response.json();
     
     // Extract key metrics
-    const performanceScore = data.lighthouseResult.categories.performance.score * 100;
-    const firstContentfulPaint = data.lighthouseResult.audits['first-contentful-paint'].displayValue;
-    const speedIndex = data.lighthouseResult.audits['speed-index'].displayValue;
+    const lighthouse = data.lighthouseResult;
+    const categories = lighthouse.categories;
     
-    // Encode results to pass them safely in the URL
-    const results = { performanceScore, firstContentfulPaint, speedIndex };
-    const encodedResults = encodeURIComponent(JSON.stringify(results));
+    const analysis = {
+      url,
+      performance: Math.round(categories.performance.score * 100),
+      accessibility: Math.round(categories.accessibility.score * 100),
+      bestPractices: Math.round(categories['best-practices'].score * 100),
+      seo: Math.round(categories.seo.score * 100),
+      loadingTime: lighthouse.audits['speed-index'].displayValue,
+      firstContentfulPaint: lighthouse.audits['first-contentful-paint'].displayValue,
+      largestContentfulPaint: lighthouse.audits['largest-contentful-paint'].displayValue,
+      cumulativeLayoutShift: lighthouse.audits['cumulative-layout-shift'].displayValue,
+      analyzedAt: new Date()
+    };
 
-    // --- D. Redirect back with results ---
-    redirect(`/dashboard/analyze-website?results=${encodedResults}`);
+    // Save analysis to database
+    await db.collection('website_analyses').insertOne({
+      userId: user._id,
+      ...analysis
+    });
+
+    return { success: true, analysis };
 
   } catch (error) {
-    console.error('Failed to fetch from PageSpeed API:', error);
-    redirect('/dashboard/analyze-website?error=api_fetch_failed');
+    console.error('Website analysis error:', error);
+    return { 
+      success: false, 
+      error: 'Failed to analyze website. Please try again.' 
+    };
   }
 }
 
-// --- 2. The Page Component ---
-// It now displays results passed via searchParams.
-export default function AnalyzeWebsitePage({ searchParams }: { searchParams?: { error?: string; results?: string } }) {
-  
-  let results = null;
-  if (searchParams?.results) {
-    try {
-      results = JSON.parse(decodeURIComponent(searchParams.results));
-    } catch {
-      // Ignore malformed results
-    }
-  }
-
+export default function AnalyzeWebsitePage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-orange-800 text-white">
-      <div className="w-full max-w-2xl p-8 space-y-6">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold">Analyze a Website's Performance</h1>
-          <p className="text-orange-200 mt-2">Enter any website URL to get a comprehensive analysis powered by AI and Google PageSpeed Insights.</p>
-        </div>
-        
-        <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-purple-500/20 p-8">
-          <form action={analyzeWebsiteAction} className="space-y-4">
-            <div>
-              <label htmlFor="urlToAnalyze" className="block text-sm font-medium text-purple-300 mb-1">
-                Website URL to Analyze
-              </label>
-              <input
-                id="urlToAnalyze"
-                name="urlToAnalyze"
-                type="url"
-                required
-                className="w-full px-4 py-2 bg-gray-800 border border-gray-600 rounded-md placeholder-gray-400 focus:outline-none focus:ring-orange-500 focus:border-orange-500"
-                placeholder="https://www.amazon.com"
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full py-3 px-4 border border-transparent rounded-md text-lg font-medium text-white bg-orange-600 hover:bg-orange-700 transition-colors"
-            >
-              Analyze Website
-            </button>
-          </form>
-        </div>
-
-        {/* Results Display */}
-        {results && (
-          <div className="bg-black/30 backdrop-blur-sm rounded-xl border border-green-500/20 p-8 mt-6">
-            <h2 className="text-2xl font-bold text-center mb-4">Analysis Results</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-              <div>
-                <p className="text-lg text-green-300">Performance Score</p>
-                <p className="text-4xl font-bold">{results.performanceScore.toFixed(0)}</p>
-              </div>
-              <div>
-                <p className="text-lg text-green-300">First Contentful Paint</p>
-                <p className="text-4xl font-bold">{results.firstContentfulPaint}</p>
-              </div>
-              <div>
-                <p className="text-lg text-green-300">Speed Index</p>
-                <p className="text-4xl font-bold">{results.speedIndex}</p>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-white mb-4">
+              Analyze a Website's Performance
+            </h1>
+            <p className="text-xl text-purple-200">
+              Enter any website URL to get a comprehensive analysis powered by AI and Google PageSpeed Insights.
+            </p>
           </div>
-        )}
 
-        {/* Error Display */}
-        {searchParams?.error && (
-            <div className="bg-red-900/50 border border-red-500 rounded-md text-center p-4 mt-6">
-              <p className="font-bold text-red-300">Analysis Failed</p>
-              <p className="text-red-400">
-                {searchParams.error === 'url_required' ? 'Website URL is required.' :
-                 searchParams.error === 'api_fetch_failed' ? 'Failed to analyze website. Please try again.' :
-                 decodeURIComponent(searchParams.error)}
-              </p>
-            </div>
-        )}
+          {/* Analysis Form */}
+          <div className="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 mb-8">
+            <form action={analyzeWebsiteAction} className="space-y-6">
+              <div>
+                <label htmlFor="url" className="block text-sm font-medium text-purple-300 mb-2">
+                  Website URL to Analyze
+                </label>
+                <input
+                  type="url"
+                  id="url"
+                  name="url"
+                  placeholder="https://www.example.com"
+                  className="w-full px-4 py-3 bg-white/20 border border-white/30 rounded-lg text-white placeholder-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  required
+                />
+                <p className="text-sm text-purple-300 mt-2">
+                  Enter the complete URL including https://
+                </p>
+              </div>
 
-        <div className="text-center mt-6">
-          <Link href="/dashboard" className="text-sm text-purple-300 hover:text-orange-200">
-            &larr; Back to Dashboard
-          </Link>
+              <button
+                type="submit"
+                className="w-full bg-gradient-to-r from-orange-500 to-red-600 text-white py-4 px-8 rounded-lg font-semibold text-lg hover:from-orange-600 hover:to-red-700 transition-all duration-200 transform hover:scale-105"
+              >
+                Analyze Website
+              </button>
+            </form>
+          </div>
+
+          {/* Back to Dashboard */}
+          <div className="text-center">
+            <a
+              href="/dashboard"
+              className="inline-flex items-center text-purple-300 hover:text-white transition-colors duration-200"
+            >
+              ← Back to Dashboard
+            </a>
+          </div>
         </div>
       </div>
     </div>
   );
-  
+}
