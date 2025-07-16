@@ -28,7 +28,7 @@ async function analyzeWebsiteAction(formData: FormData) {
 
   // --- C. Call Google PageSpeed API ---
   // This is the core logic for the analysis.
-  const googleApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(urlToAnalyze )}&key=${process.env.PAGESPEED_API_KEY}`;
+  const googleApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(urlToAnalyze)}&key=${process.env.PAGESPEED_API_KEY}`;
 
   try {
     const response = await fetch(googleApiUrl);
@@ -109,7 +109,7 @@ export default function AnalyzeWebsitePage({ searchParams }: { searchParams?: { 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
               <div>
                 <p className="text-lg text-green-300">Performance Score</p>
-                <p className="text-4xl font-bold">{results.performanceScore.toFixed(0 )}</p>
+                <p className="text-4xl font-bold">{results.performanceScore.toFixed(0)}</p>
               </div>
               <div>
                 <p className="text-lg text-green-300">First Contentful Paint</p>
@@ -127,7 +127,11 @@ export default function AnalyzeWebsitePage({ searchParams }: { searchParams?: { 
         {searchParams?.error && (
             <div className="bg-red-900/50 border border-red-500 rounded-md text-center p-4 mt-6">
               <p className="font-bold text-red-300">Analysis Failed</p>
-              <p className="text-red-400">{decodeURIComponent(searchParams.error)}</p>
+              <p className="text-red-400">
+                {searchParams.error === 'url_required' ? 'Website URL is required.' :
+                 searchParams.error === 'api_fetch_failed' ? 'Failed to analyze website. Please try again.' :
+                 decodeURIComponent(searchParams.error)}
+              </p>
             </div>
         )}
 
@@ -139,4 +143,4 @@ export default function AnalyzeWebsitePage({ searchParams }: { searchParams?: { 
       </div>
     </div>
   );
-}
+  
