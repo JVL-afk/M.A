@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { addTeamMember, removeTeamMember, generateApiKey, deleteApiKey, updateWhiteLabel } from './page';
+import { addTeamMember, removeTeamMember, generateApiKey, deleteApiKey, updateWhiteLabel } from './enterprise-actions';
 
 // Define the interface for whiteLabelSettings
 interface WhiteLabelSettings {
