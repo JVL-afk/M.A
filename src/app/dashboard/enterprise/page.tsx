@@ -1,284 +1,253 @@
-import { cookies } from 'next/headers';
 import Link from 'next/link';
-import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '@/lib/mongodb';
-import { ObjectId } from 'mongodb';
-import crypto from 'crypto';
-import EnterpriseClient from './enterprise-client';
+import { 
+  addTeamMember, 
+  removeTeamMember, 
+  generateApiKey, 
+  deleteApiKey, 
+  updateWhiteLabel 
+} from './enterprise-actions';
 
-// Define the interface for whiteLabelSettings
-interface WhiteLabelSettings {
-  companyName?: string;
-  companyLogo?: string;
-  primaryColor?: string;
-  accentColor?: string;
-  footerText?: string;
-}
-
-// Enterprise Dashboard Page (Server Component)
-export default async function EnterprisePage({ searchParams }: { searchParams: { tab?: string; error?: string; success?: string } }) {
-  const token = cookies().get('auth-token')?.value;
-  
-  let userInfo = null;
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-      
-      const client = await connectToDatabase();
-      const db = client.db('affilify');
-      
-      const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
-      if (user) {
-        const userPlan = user.plan || 'basic';
-        userInfo = { user, plan: userPlan };
-      }
-    } catch (error) {
-      return redirect('/login');
-    }
-  }
-  
-  if (!userInfo || userInfo.plan !== 'enterprise') {
-    return redirect('/pricing?feature=enterprise');
-  }
-  
-  const activeTab = searchParams?.tab || 'team';
-  const errorMessage = searchParams?.error;
-  const successMessage = searchParams?.success;
-  
-  // Get team members, API keys, and white-label settings
-  const client = await connectToDatabase();
-  const db = client.db('affilify');
-  
-  const teamMembers = await db.collection('team_members')
-    .find({ organizationId: userInfo.user._id })
-    .sort({ createdAt: -1 })
-    .toArray();
-  
-  const apiKeys = await db.collection('api_keys')
-    .find({ userId: userInfo.user._id })
-    .sort({ createdAt: -1 })
-    .toArray();
-  
-  // Initialize with empty object and proper type
-  const whiteLabelSettings: WhiteLabelSettings = await db.collection('white_label_settings')
-    .findOne({ userId: userInfo.user._id }) || {};
-  
-  // Pass all data to client component
+export default function EnterprisePage() {
   return (
-    <EnterpriseClient 
-      userInfo={userInfo}
-      activeTab={activeTab}
-      errorMessage={errorMessage}
-      successMessage={successMessage}
-      teamMembers={teamMembers}
-      apiKeys={apiKeys}
-      whiteLabelSettings={whiteLabelSettings}
-    />
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Enterprise Dashboard</h1>
+          <p className="mt-2 text-gray-600">Manage your enterprise features and settings</p>
+        </div>
+
+        {/* Team Management Section */}
+        <div className="bg-white shadow rounded-lg mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">Team Management</h2>
+          </div>
+          <div className="p-6">
+            <form action={addTeamMember} className="mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    name="email"
+                    id="email"
+                    required
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="role" className="block text-sm font-medium text-gray-700">
+                    Role
+                  </label>
+                  <select
+                    name="role"
+                    id="role"
+                    required
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Select a role</option>
+                    <option value="admin">Admin</option>
+                    <option value="editor">Editor</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                Add Team Member
+              </button>
+            </form>
+
+            {/* Team Members List */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900">Current Team Members</h3>
+              {/* This would be populated with actual team members data */}
+              <div className="border border-gray-200 rounded-md p-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-medium">john@example.com</p>
+                    <p className="text-sm text-gray-500">Admin</p>
+                  </div>
+                  <form action={removeTeamMember}>
+                    <input type="hidden" name="memberId" value="example-id" />
+                    <button
+                      type="submit"
+                      className="text-red-600 hover:text-red-800 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* API Key Management Section */}
+        <div className="bg-white shadow rounded-lg mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">API Key Management</h2>
+          </div>
+          <div className="p-6">
+            <form action={generateApiKey} className="mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="keyName" className="block text-sm font-medium text-gray-700">
+                    Key Name
+                  </label>
+                  <input
+                    type="text"
+                    name="keyName"
+                    id="keyName"
+                    required
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Permissions
+                  </label>
+                  <div className="mt-2 space-y-2">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="apiPermissions"
+                        value="read"
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Read</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="apiPermissions"
+                        value="write"
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Write</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        name="apiPermissions"
+                        value="delete"
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Delete</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="mt-4 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                Generate API Key
+              </button>
+            </form>
+
+            {/* API Keys List */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium text-gray-900">Active API Keys</h3>
+              {/* This would be populated with actual API keys data */}
+              <div className="border border-gray-200 rounded-md p-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-medium">Production Key</p>
+                    <p className="text-sm text-gray-500 font-mono">ak_***************</p>
+                    <p className="text-xs text-gray-400">Read, Write permissions</p>
+                  </div>
+                  <form action={deleteApiKey}>
+                    <input type="hidden" name="keyId" value="example-key-id" />
+                    <button
+                      type="submit"
+                      className="text-red-600 hover:text-red-800 text-sm"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* White Label Settings Section */}
+        <div className="bg-white shadow rounded-lg">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">White Label Settings</h2>
+          </div>
+          <div className="p-6">
+            <form action={updateWhiteLabel}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="companyName" className="block text-sm font-medium text-gray-700">
+                    Company Name
+                  </label>
+                  <input
+                    type="text"
+                    name="companyName"
+                    id="companyName"
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="companyLogo" className="block text-sm font-medium text-gray-700">
+                    Company Logo URL
+                  </label>
+                  <input
+                    type="url"
+                    name="companyLogo"
+                    id="companyLogo"
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="primaryColor" className="block text-sm font-medium text-gray-700">
+                    Primary Color
+                  </label>
+                  <input
+                    type="color"
+                    name="primaryColor"
+                    id="primaryColor"
+                    className="mt-1 block w-full h-10 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="secondaryColor" className="block text-sm font-medium text-gray-700">
+                    Secondary Color
+                  </label>
+                  <input
+                    type="color"
+                    name="secondaryColor"
+                    id="secondaryColor"
+                    className="mt-1 block w-full h-10 border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                className="mt-6 bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                Update White Label Settings
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="mt-8">
+          <Link
+            href="/dashboard"
+            className="text-blue-600 hover:text-blue-800 font-medium"
+          >
+            ← Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    </div>
   );
-}
-
-// Server Actions
-export async function addTeamMember(formData: FormData) {
-  'use server';
-  
-  const email = formData.get('email') as string;
-  const role = formData.get('role') as string;
-  const permissions = formData.getAll('permissions') as string[];
-  
-  // Validate email
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return { success: false, error: 'Please enter a valid email address.' };
-  }
-  
-  try {
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
-      return { success: false, error: 'Authentication required.' };
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    
-    // Check if email already exists
-    const existingMember = await db.collection('team_members').findOne({ email });
-    if (existingMember) {
-      return { success: false, error: 'This email is already a team member.' };
-    }
-    
-    // Add team member
-    await db.collection('team_members').insertOne({
-      email,
-      role,
-      permissions,
-      organizationId: new ObjectId(decoded.userId),
-      status: 'pending',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    
-    // TODO: Send invitation email
-    
-    return { success: true, message: 'Team member has been successfully added!' };
-  } catch (error) {
-    console.error('ADD_TEAM_MEMBER_ERROR:', error);
-    return { success: false, error: 'Failed to add team member. Please try again.' };
-  }
-}
-
-export async function removeTeamMember(formData: FormData) {
-  'use server';
-  
-  const memberId = formData.get('memberId') as string;
-  
-  try {
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
-      return { success: false, error: 'Authentication required.' };
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    
-    // Remove team member
-    await db.collection('team_members').deleteOne({
-      _id: new ObjectId(memberId),
-      organizationId: new ObjectId(decoded.userId),
-    });
-    
-    return { success: true, message: 'Team member has been removed.' };
-  } catch (error) {
-    console.error('REMOVE_TEAM_MEMBER_ERROR:', error);
-    return { success: false, error: 'Failed to remove team member. Please try again.' };
-  }
-}
-
-export async function generateApiKey(formData: FormData) {
-  'use server';
-  
-  const keyName = formData.get('keyName') as string;
-  const permissions = formData.getAll('apiPermissions') as string[];
-  
-  try {
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
-      return { success: false, error: 'Authentication required.' };
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    
-    // Check API key limit
-    const keyCount = await db.collection('api_keys').countDocuments({
-      userId: new ObjectId(decoded.userId),
-    });
-    
-    if (keyCount >= 5) {
-      return { success: false, error: 'Maximum number of API keys reached (5).' };
-    }
-    
-    // Generate API key
-    const apiKey = crypto.randomBytes(32).toString('hex');
-    
-    // Save API key
-    await db.collection('api_keys').insertOne({
-      name: keyName,
-      key: apiKey,
-      permissions,
-      userId: new ObjectId(decoded.userId),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    
-    return { success: true, message: 'API key has been generated successfully!', apiKey };
-  } catch (error) {
-    console.error('GENERATE_API_KEY_ERROR:', error);
-    return { success: false, error: 'Operation failed. Please try again.' };
-  }
-}
-
-export async function deleteApiKey(formData: FormData) {
-  'use server';
-  
-  const keyId = formData.get('keyId') as string;
-  
-  try {
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
-      return { success: false, error: 'Authentication required.' };
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    
-    // Delete API key
-    await db.collection('api_keys').deleteOne({
-      _id: new ObjectId(keyId),
-      userId: new ObjectId(decoded.userId),
-    });
-    
-    return { success: true, message: 'API key has been deleted.' };
-  } catch (error) {
-    console.error('DELETE_API_KEY_ERROR:', error);
-    return { success: false, error: 'Failed to delete API key. Please try again.' };
-  }
-}
-
-export async function updateWhiteLabel(formData: FormData) {
-  'use server';
-  
-  const companyName = formData.get('companyName') as string;
-  const companyLogo = formData.get('companyLogo') as string;
-  const primaryColor = formData.get('primaryColor') as string;
-  const accentColor = formData.get('accentColor') as string;
-  const footerText = formData.get('footerText') as string;
-  
-  try {
-    const token = cookies().get('auth-token')?.value;
-    if (!token) {
-      return { success: false, error: 'Authentication required.' };
-    }
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    
-    // Update or create white-label settings
-    await db.collection('white_label_settings').updateOne(
-      { userId: new ObjectId(decoded.userId) },
-      {
-        $set: {
-          companyName,
-          companyLogo,
-          primaryColor,
-          accentColor,
-          footerText,
-          updatedAt: new Date(),
-        },
-      },
-      { upsert: true }
-    );
-    
-    return { success: true, message: 'White-label settings have been updated!' };
-  } catch (error) {
-    console.error('UPDATE_WHITE_LABEL_ERROR:', error);
-    return { success: false, error: 'Failed to update white-label settings. Please try again.' };
-  }
-}
-
-function redirect(path: string) {
-  return {
-    redirect: {
-      destination: path,
-      permanent: false,
-    },
-  };
 }
