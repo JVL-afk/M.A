@@ -57,9 +57,18 @@ export default async function EnterprisePage({ searchParams }: { searchParams: {
     .sort({ createdAt: -1 })
     .toArray();
   
-  // Initialize with empty object and proper type
-  const whiteLabelSettings: WhiteLabelSettings = await db.collection('white_label_settings')
-    .findOne({ userId: userInfo.user._id }) || {};
+  // Initialize with empty object and proper type casting
+  const dbSettings = await db.collection('white_label_settings')
+    .findOne({ userId: userInfo.user._id });
+    
+  // Convert MongoDB document to our interface type with proper type casting
+  const whiteLabelSettings: WhiteLabelSettings = dbSettings ? {
+    companyName: dbSettings.companyName,
+    companyLogo: dbSettings.companyLogo,
+    primaryColor: dbSettings.primaryColor,
+    accentColor: dbSettings.accentColor,
+    footerText: dbSettings.footerText
+  } : {};
   
   // Pass all data to client component
   return (
@@ -83,3 +92,4 @@ function redirect(path: string) {
     },
   };
 }
+
