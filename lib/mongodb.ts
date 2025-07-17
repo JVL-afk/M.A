@@ -1,4 +1,4 @@
-import { MongoClient, Db } from 'mongodb';
+import { MongoClient, Db, MongoClientOptions } from 'mongodb';
 
 // Global connection cache to prevent multiple connections
 declare global {
@@ -14,8 +14,8 @@ if (!MONGODB_URI) {
   throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
 }
 
-// Connection options optimized for performance and scalability
-const options = {
+// Connection options optimized for performance and scalability with proper TypeScript types
+const options: MongoClientOptions = {
   // Connection Pool Settings
   minPoolSize: 5,          // Minimum number of connections in pool
   maxPoolSize: 50,         // Maximum number of connections in pool
@@ -37,21 +37,13 @@ const options = {
   // Read Preference for Load Distribution
   readPreference: 'primaryPreferred',
   
-  // Compression for Network Efficiency
-  compressors: ['zlib'],
+  // Compression for Network Efficiency - Fixed TypeScript type
+  compressors: ['zlib'] as ('zlib' | 'none' | 'snappy' | 'zstd')[],
   zlibCompressionLevel: 6,
   
   // Retry Logic
   retryWrites: true,
   retryReads: true,
-  
-  // Buffer Settings
-  bufferMaxEntries: 0,
-  bufferCommands: false,
-  
-  // Additional Performance Options
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
   
   // Application Name for Monitoring
   appName: 'AFFILIFY-Production',
