@@ -1,224 +1,86 @@
-import { MongoClient, Db, MongoClientOptions } from 'mongodb';
+import { MongoClient, MongoClientOptions, Db } from 'mongodb';
 
-// Global connection cache to prevent multiple connections
-declare global {
-  var _mongoClientPromise: Promise<MongoClient> | undefined;
-  var _mongoClient: MongoClient | undefined;
-}
+// Check if we're in a browser environment (Edge Runtime)
+const isBrowser = typeof window !== 'undefined';
+const isEdgeRuntime = !isBrowser && typeof process.env.NEXT_RUNTIME === 'string' && process.env.NEXT_RUNTIME === 'edge';
 
-// MongoDB connection configuration optimized for production
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB = process.env.MONGODB_DB || 'affilify';
+// Connection URI
+const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
+const dbName = process.env.MONGODB_DB || 'affilify';
 
-if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable inside .env.local');
-}
-
-// Connection options optimized for performance and scalability with proper TypeScript types
+// Connection options
 const options: MongoClientOptions = {
-  // Connection Pool Settings
-  minPoolSize: 5,          // Minimum number of connections in pool
-  maxPoolSize: 50,         // Maximum number of connections in pool
-  maxIdleTimeMS: 600000,   // Close connections after 10 minutes of inactivity
-  maxConnecting: 10,       // Maximum number of connections being established
-  
-  // Connection Timeout Settings
-  serverSelectionTimeoutMS: 30000,  // 30 seconds
-  socketTimeoutMS: 45000,           // 45 seconds
-  connectTimeoutMS: 30000,          // 30 seconds
-  
-  // Heartbeat and Monitoring
-  heartbeatFrequencyMS: 10000,      // 10 seconds
-  
-  // Write Concern for Performance
-  w: 'majority',
-  wtimeoutMS: 10000,
-  
-  // Read Preference for Load Distribution
-  readPreference: 'primaryPreferred',
-  
-  // Compression for Network Efficiency - Fixed TypeScript type
-  compressors: ['zlib'] as ('zlib' | 'none' | 'snappy' | 'zstd')[],
-  zlibCompressionLevel: 6,
-  
-  // Retry Logic
-  retryWrites: true,
-  retryReads: true,
-  
-  // Application Name for Monitoring
-  appName: 'AFFILIFY-Production',
+  maxPoolSize: 50,
+  minPoolSize: 5,
+  maxIdleTimeMS: 30000,
+  connectTimeoutMS: 10000,
+  // Only use compressors in Node.js environment, not in Edge Runtime
+  ...(isEdgeRuntime ? {} : { compressors: ['zlib'] as ('zlib' | 'none' | 'snappy' | 'zstd')[] })
 };
 
+// Global MongoDB client reference
+let client: MongoClient | null = null;
 let clientPromise: Promise<MongoClient>;
 
+// In development mode, use a global variable so that the value
+// is preserved across module reloads caused by HMR (Hot Module Replacement).
 if (process.env.NODE_ENV === 'development') {
-  // In development mode, use a global variable to preserve the connection
-  // across module reloads caused by HMR (Hot Module Replacement)
-  if (!global._mongoClientPromise) {
-    const client = new MongoClient(MONGODB_URI, options);
-    global._mongoClientPromise = client.connect();
+  // In development mode, use a global variable so that the value
+  // is preserved across module reloads caused by HMR (Hot Module Replacement).
+  let globalWithMongo = global as typeof globalThis & {
+    _mongoClientPromise?: Promise<MongoClient>;
+  };
+
+  if (!globalWithMongo._mongoClientPromise) {
+    client = new MongoClient(uri, options);
+    globalWithMongo._mongoClientPromise = client.connect();
   }
-  clientPromise = global._mongoClientPromise;
+  clientPromise = globalWithMongo._mongoClientPromise;
 } else {
-  // In production mode, create a new client for each connection
-  const client = new MongoClient(MONGODB_URI, options);
+  // In production mode, it's best to not use a global variable.
+  client = new MongoClient(uri, options);
   clientPromise = client.connect();
 }
 
-// Enhanced connection function with error handling and retry logic
-export async function connectToDatabase(): Promise<MongoClient> {
+// Export a module-scoped MongoClient promise. By doing this in a
+// separate module, the client can be shared across functions.
+export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db }> {
   try {
     const client = await clientPromise;
-    
-    // Verify connection is active
-    await client.db('admin').command({ ping: 1 });
-    
-    return client;
+    const db = client.db(dbName);
+    return { client, db };
   } catch (error) {
-    console.error('MongoDB connection error:', error);
-    
-    // Implement retry logic for connection failures
-    if (error instanceof Error && error.message.includes('timeout')) {
-      console.log('Retrying MongoDB connection...');
-      // Reset the promise to force a new connection attempt
-      if (process.env.NODE_ENV === 'development') {
-        global._mongoClientPromise = undefined;
-      }
-      // Recursive retry with exponential backoff
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return connectToDatabase();
-    }
-    
-    throw error;
+    console.error('MONGODB_CONNECTION_ERROR:', error);
+    throw new Error('Failed to connect to database');
   }
 }
 
-// Get database instance with connection verification
-export async function getDatabase(): Promise<Db> {
-  const client = await connectToDatabase();
-  return client.db(MONGODB_DB);
-}
-
-// Optimized collection access with indexing
-export async function getCollection(collectionName: string) {
-  const db = await getDatabase();
-  const collection = db.collection(collectionName);
-  
-  // Ensure indexes are created for optimal performance
-  await ensureIndexes(collection, collectionName);
-  
-  return collection;
-}
-
-// Index creation for optimal query performance
-async function ensureIndexes(collection: any, collectionName: string) {
+// Health check function
+export async function checkDatabaseConnection(): Promise<boolean> {
   try {
-    switch (collectionName) {
-      case 'users':
-        // Compound index for authentication queries
-        await collection.createIndex({ email: 1 }, { unique: true, background: true });
-        await collection.createIndex({ _id: 1, email: 1 }, { background: true });
-        await collection.createIndex({ plan: 1, createdAt: -1 }, { background: true });
-        await collection.createIndex({ stripeCustomerId: 1 }, { sparse: true, background: true });
-        break;
-        
-      case 'websites':
-        // Indexes for website queries
-        await collection.createIndex({ userId: 1, createdAt: -1 }, { background: true });
-        await collection.createIndex({ userId: 1, status: 1 }, { background: true });
-        await collection.createIndex({ domain: 1 }, { sparse: true, background: true });
-        await collection.createIndex({ template: 1, createdAt: -1 }, { background: true });
-        break;
-        
-      case 'analytics':
-        // Indexes for analytics queries
-        await collection.createIndex({ userId: 1, date: -1 }, { background: true });
-        await collection.createIndex({ websiteId: 1, date: -1 }, { background: true });
-        await collection.createIndex({ userId: 1, websiteId: 1, date: -1 }, { background: true });
-        break;
-        
-      case 'payment_attempts':
-        // Indexes for payment tracking
-        await collection.createIndex({ sessionId: 1 }, { unique: true, background: true });
-        await collection.createIndex({ userId: 1, createdAt: -1 }, { background: true });
-        await collection.createIndex({ status: 1, createdAt: -1 }, { background: true });
-        break;
-        
-      case 'api_keys':
-        // Indexes for API key management
-        await collection.createIndex({ userId: 1 }, { background: true });
-        await collection.createIndex({ keyHash: 1 }, { unique: true, background: true });
-        await collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, background: true });
-        break;
-        
-      default:
-        // Default indexes for common patterns
-        await collection.createIndex({ createdAt: -1 }, { background: true });
-        break;
-    }
+    const { client } = await connectToDatabase();
+    await client.db().admin().ping();
+    return true;
   } catch (error) {
-    // Log index creation errors but don't fail the connection
-    console.warn(`Index creation warning for ${collectionName}:`, error);
-  }
-}
-
-// Connection health check function
-export async function checkDatabaseHealth(): Promise<boolean> {
-  try {
-    const client = await connectToDatabase();
-    const result = await client.db('admin').command({ ping: 1 });
-    return result.ok === 1;
-  } catch (error) {
-    console.error('Database health check failed:', error);
+    console.error('MONGODB_HEALTH_CHECK_ERROR:', error);
     return false;
   }
 }
 
-// Graceful shutdown function
-export async function closeDatabaseConnection(): Promise<void> {
+// Create indexes function - can be called during app initialization
+export async function createIndexes(): Promise<void> {
   try {
-    if (global._mongoClient) {
-      await global._mongoClient.close();
-      global._mongoClient = undefined;
-      global._mongoClientPromise = undefined;
-    }
+    const { db } = await connectToDatabase();
+    
+    // Create indexes for common collections
+    await db.collection('users').createIndex({ email: 1 }, { unique: true });
+    await db.collection('websites').createIndex({ userId: 1 });
+    await db.collection('analytics').createIndex({ websiteId: 1, date: 1 });
+    await db.collection('team_members').createIndex({ organizationId: 1 });
+    await db.collection('api_keys').createIndex({ userId: 1 });
+    
+    console.log('MongoDB indexes created successfully');
   } catch (error) {
-    console.error('Error closing database connection:', error);
+    console.error('MONGODB_INDEX_CREATION_ERROR:', error);
   }
 }
-
-// Performance monitoring utilities
-export async function getDatabaseStats() {
-  try {
-    const db = await getDatabase();
-    const stats = await db.stats();
-    return {
-      collections: stats.collections,
-      dataSize: stats.dataSize,
-      indexSize: stats.indexSize,
-      storageSize: stats.storageSize,
-      avgObjSize: stats.avgObjSize,
-    };
-  } catch (error) {
-    console.error('Error getting database stats:', error);
-    return null;
-  }
-}
-
-// Connection pool monitoring
-export async function getConnectionPoolStats() {
-  try {
-    const client = await connectToDatabase();
-    // Note: Connection pool stats are available in MongoDB driver 4.0+
-    return {
-      currentCheckedOut: 'Available in driver 4.0+',
-      currentCreated: 'Available in driver 4.0+',
-      totalCreated: 'Available in driver 4.0+',
-    };
-  } catch (error) {
-    console.error('Error getting connection pool stats:', error);
-    return null;
-  }
-}
-
-export default clientPromise;
