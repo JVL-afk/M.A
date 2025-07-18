@@ -1,21 +1,26 @@
 import { MongoClient, MongoClientOptions, Db } from 'mongodb';
 
-// Check if we're in a browser environment (Edge Runtime)
-const isBrowser = typeof window !== 'undefined';
-const isEdgeRuntime = !isBrowser && typeof process.env.NEXT_RUNTIME === 'string' && process.env.NEXT_RUNTIME === 'edge';
+// Environment detection
+const isServer = typeof window === 'undefined';
+const isEdgeRuntime = isServer && typeof process.env.NEXT_RUNTIME === 'string' && process.env.NEXT_RUNTIME === 'edge';
+const isNodeRuntime = isServer && !isEdgeRuntime;
 
 // Connection URI
 const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017';
 const dbName = process.env.MONGODB_DB || 'affilify';
 
-// Connection options
+// Connection options - different for Node.js and Edge Runtime
 const options: MongoClientOptions = {
+  // Common options
   maxPoolSize: 50,
   minPoolSize: 5,
   maxIdleTimeMS: 30000,
   connectTimeoutMS: 10000,
-  // Only use compressors in Node.js environment, not in Edge Runtime
-  ...(isEdgeRuntime ? {} : { compressors: ['zlib'] as ('zlib' | 'none' | 'snappy' | 'zstd')[] })
+  
+  // Node.js specific options - only apply in Node.js environment
+  ...(isNodeRuntime ? {
+    compressors: ['zlib'] as ('zlib' | 'none' | 'snappy' | 'zstd')[]
+  } : {})
 };
 
 // Global MongoDB client reference
@@ -24,7 +29,7 @@ let clientPromise: Promise<MongoClient>;
 
 // In development mode, use a global variable so that the value
 // is preserved across module reloads caused by HMR (Hot Module Replacement).
-if (process.env.NODE_ENV === 'development') {
+if (process.env.NODE_ENV === 'development' && isNodeRuntime) {
   // In development mode, use a global variable so that the value
   // is preserved across module reloads caused by HMR (Hot Module Replacement).
   let globalWithMongo = global as typeof globalThis & {
@@ -36,7 +41,7 @@ if (process.env.NODE_ENV === 'development') {
     globalWithMongo._mongoClientPromise = client.connect();
   }
   clientPromise = globalWithMongo._mongoClientPromise;
-} else {
+} else if (isServer) {
   // In production mode, it's best to not use a global variable.
   client = new MongoClient(uri, options);
   clientPromise = client.connect();
@@ -45,6 +50,11 @@ if (process.env.NODE_ENV === 'development') {
 // Export a module-scoped MongoClient promise. By doing this in a
 // separate module, the client can be shared across functions.
 export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db }> {
+  // If we're in the browser, we can't connect to MongoDB directly
+  if (!isServer) {
+    throw new Error('Cannot connect to MongoDB from the browser');
+  }
+  
   try {
     const client = await clientPromise;
     const db = client.db(dbName);
@@ -57,6 +67,10 @@ export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db
 
 // Health check function
 export async function checkDatabaseConnection(): Promise<boolean> {
+  if (!isServer) {
+    return false;
+  }
+  
   try {
     const { client } = await connectToDatabase();
     await client.db().admin().ping();
@@ -69,6 +83,10 @@ export async function checkDatabaseConnection(): Promise<boolean> {
 
 // Create indexes function - can be called during app initialization
 export async function createIndexes(): Promise<void> {
+  if (!isServer) {
+    return;
+  }
+  
   try {
     const { db } = await connectToDatabase();
     
@@ -84,3 +102,4 @@ export async function createIndexes(): Promise<void> {
     console.error('MONGODB_INDEX_CREATION_ERROR:', error);
   }
 }
+
