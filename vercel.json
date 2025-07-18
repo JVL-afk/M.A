@@ -1,0 +1,55 @@
+{
+  "buildCommand": "npm run build",
+  "framework": "nextjs",
+  "outputDirectory": ".next",
+  "regions": ["sfo1"],
+  "env": {
+    "NEXT_DISABLE_EDGE_RUNTIME": "1"
+  },
+  "headers": [
+    {
+      "source": "/favicon.ico",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/favicon.png",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/_next/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "src": "/favicon.ico",
+      "dest": "/favicon.ico",
+      "check": true
+    },
+    {
+      "src": "/favicon.png",
+      "dest": "/favicon.png",
+      "check": true
+    },
+    {
+      "src": "/_next/static/(.*)",
+      "dest": "/_next/static/$1",
+      "check": true
+    }
+  ]
+}
