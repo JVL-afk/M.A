@@ -5,9 +5,10 @@ import jwt from 'jsonwebtoken';
 
 export async function POST(request: NextRequest) {
   try {
-    // --- 1. Get User Credentials ---
+    // Get request body
     const { email, password } = await request.json();
 
+    // Validate input
     if (!email || !password) {
       return NextResponse.json(
         { success: false, error: 'Email and password are required.' },
@@ -15,64 +16,94 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // --- 2. Connect to Database ---
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    const usersCollection = db.collection('users');
+    // Connect to database
+    const { db } = await connectToDatabase();
 
-    // --- 3. Find User ---
-    const user = await usersCollection.findOne({ email: email.toLowerCase() });
+    // Find user by email
+    const user = await db.collection('users').findOne({ email });
+
+    // Check if user exists
     if (!user) {
       return NextResponse.json(
-        { success: false, error: 'Invalid credentials. Please check your email and password.' },
-        { status: 401 } // Unauthorized
-      );
-    }
-
-    // --- 4. Compare Passwords ---
-    const isPasswordMatch = await bcrypt.compare(password, user.password);
-    if (!isPasswordMatch) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid credentials. Please check your email and password.' },
+        { success: false, error: 'Invalid email or password.' },
         { status: 401 }
       );
     }
 
-    // --- 5. Generate JWT Token (THE CRITICAL FIX) ---
+    // Check password
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid email or password.' },
+        { status: 401 }
+      );
+    }
+
+    // Create JWT token
     const token = jwt.sign(
       { userId: user._id, email: user.email },
       process.env.JWT_SECRET || 'your-default-secret-key-for-development',
       { expiresIn: '7d' }
     );
 
-    // --- 6. Update Last Login and Create Response (THE SECOND CRITICAL FIX) ---
-    await usersCollection.updateOne(
-      { _id: user._id },
-      { $set: { lastLoginAt: new Date() } }
-    );
+    // Prepare user data (excluding password)
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      plan: user.plan || 'basic',
+      createdAt: user.createdAt,
+    };
 
+    // Create response
     const response = NextResponse.json({
       success: true,
-      message: 'Login successful!',
+      user: userData,
+      message: 'Login successful!'
     });
 
-    // Set the token in a secure, HttpOnly cookie
-    response.cookies.set('auth-token', token, {
+    // Get the hostname for proper cookie domain setting
+    const hostname = request.headers.get('host') || '';
+    const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1');
+    
+    // Determine the correct cookie domain
+    let cookieDomain;
+    if (isLocalhost) {
+      cookieDomain = undefined; // Let browser set for localhost
+    } else if (hostname.includes('netlify.app')) {
+      cookieDomain = '.netlify.app'; // For Netlify subdomain
+    } else if (hostname.includes('affilify.eu')) {
+      cookieDomain = '.affilify.eu'; // For custom domain
+    } else {
+      // Extract domain from hostname (e.g., example.com from subdomain.example.com)
+      const domainParts = hostname.split('.');
+      if (domainParts.length >= 2) {
+        cookieDomain = `.${domainParts[domainParts.length - 2]}.${domainParts[domainParts.length - 1]}`;
+      }
+    }
+
+    // Set auth token cookie with appropriate domain
+    response.cookies.set({
+      name: 'auth-token',
+      value: token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: !isLocalhost, // Secure in production
       sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    } );
+      domain: cookieDomain, // Use the determined domain
+      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
+    });
+
+    // Log successful login
+    console.log(`User logged in: ${email}`);
 
     return response;
-
   } catch (error) {
     console.error('LOGIN_ERROR:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
     return NextResponse.json(
-      { success: false, error: 'An internal server error occurred.', details: errorMessage },
+      { success: false, error: 'An error occurred during login.' },
       { status: 500 }
     );
   }
 }
+
