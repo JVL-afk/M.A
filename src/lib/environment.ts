@@ -331,5 +331,7 @@ export function checkEnvironmentHealth(): {
   if (!config.email) issues.push('Email service not configured');
   if (!config.monitoring) issues.push('Monitoring not configured');
   
-  const status = issues.length === 0 ? '
+const status = issues.length === 0 ? 'healthy' :
+                issues.some(issue => issue.includes('missing') || issue.includes('incomplete')) ? 'error' : 'warning';
+
     
