@@ -3,7 +3,6 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import Navbar from '@/components/Navbar'
 
 function CheckoutForm() {
   const searchParams = useSearchParams()
