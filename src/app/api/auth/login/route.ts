@@ -1,109 +1,187 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '@/lib/mongodb';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { withErrorHandler, ErrorFactory, ValidationHelper } from '../../../../lib/error-handler';
+import { rateLimit } from '../../../../lib/rate-limit';
+import { UserUtils, JWTUtils, SessionUtils } from '../../../../lib/auth/utils';
+import { COOKIE_OPTIONS } from '../../../../lib/auth-middleware';
 
-export async function POST(request: NextRequest) {
+// Login handler
+async function handleLogin(request: NextRequest): Promise<NextResponse> {
+  // Rate limiting for authentication
+  const rateLimitResult = await rateLimit(request, 'auth');
+  if (!rateLimitResult.success) {
+    throw ErrorFactory.rateLimit('Too many login attempts. Please try again later.');
+  }
+  
+  const body = await request.json();
+  
+  // Validate request body
+  ValidationHelper.validateRequired(body.email, 'email');
+  ValidationHelper.validateRequired(body.password, 'password');
+  ValidationHelper.validateEmail(body.email);
+  
+  const { email, password } = body;
+  
   try {
-    // Get request body
-    const { email, password } = await request.json();
-
-    // Validate input
-    if (!email || !password) {
-      return NextResponse.json(
-        { success: false, error: 'Email and password are required.' },
-        { status: 400 }
-      );
+    // Authenticate user
+    const authResult = await UserUtils.authenticateUser(email, password);
+    
+    if (!authResult.success) {
+      throw ErrorFactory.authentication(authResult.error || 'Authentication failed');
     }
+    
+    const user = authResult.user!;
+    const accessToken = authResult.token!;
+    const refreshToken = authResult.refreshToken!;
+    
+    // Create session
+    await SessionUtils.createSession(user._id!, refreshToken);
+    
+    // Create response with secure cookies
+    const response = NextResponse.json({
+      success: true,
+      data: {
+        user: UserUtils.sanitizeUser(user),
+        accessToken
+      },
+      message: 'Login successful'
+    });
+    
+    // Set secure HTTP-only cookies
+    response.cookies.set('access-token', accessToken, COOKIE_OPTIONS);
+    response.cookies.set('refresh-token', refreshToken, {
+      ...COOKIE_OPTIONS,
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days for refresh token
+    });
+    
+    // Add security headers
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.set('X-XSS-Protection', '1; mode=block');
+    
+    return response;
+    
+  } catch (error) {
+    // Log failed login attempt
+    console.error('Login failed for email:', email, error);
+    throw error;
+  }
+}
 
-    // Connect to database
-    const { db } = await connectToDatabase();
-
-    // Find user by email
-    const user = await db.collection('users').findOne({ email });
-
-    // Check if user exists
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid email or password.' },
-        { status: 401 }
-      );
+// Logout handler
+async function handleLogout(request: NextRequest): Promise<NextResponse> {
+  try {
+    // Extract refresh token from cookies
+    const refreshToken = request.cookies.get('refresh-token')?.value;
+    
+    if (refreshToken) {
+      // Revoke session
+      await SessionUtils.revokeSession(refreshToken);
     }
-
-    // Check password
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid email or password.' },
-        { status: 401 }
-      );
-    }
-
-    // Create JWT token
-    const token = jwt.sign(
-      { userId: user._id, email: user.email },
-      process.env.JWT_SECRET || 'your-default-secret-key-for-development',
-      { expiresIn: '7d' }
-    );
-
-    // Prepare user data (excluding password)
-    const userData = {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      plan: user.plan || 'basic',
-      createdAt: user.createdAt,
-    };
-
+    
     // Create response
     const response = NextResponse.json({
       success: true,
-      user: userData,
-      message: 'Login successful!'
+      message: 'Logout successful'
     });
-
-    // Get the hostname for proper cookie domain setting
-    const hostname = request.headers.get('host') || '';
-    const isLocalhost = hostname.includes('localhost') || hostname.includes('127.0.0.1');
     
-    // Determine the correct cookie domain
-    let cookieDomain;
-    if (isLocalhost) {
-      cookieDomain = undefined; // Let browser set for localhost
-    } else if (hostname.includes('netlify.app')) {
-      cookieDomain = '.netlify.app'; // For Netlify subdomain
-    } else if (hostname.includes('affilify.eu')) {
-      cookieDomain = '.affilify.eu'; // For custom domain
-    } else {
-      // Extract domain from hostname (e.g., example.com from subdomain.example.com)
-      const domainParts = hostname.split('.');
-      if (domainParts.length >= 2) {
-        cookieDomain = `.${domainParts[domainParts.length - 2]}.${domainParts[domainParts.length - 1]}`;
-      }
-    }
-
-    // Set auth token cookie with appropriate domain
-    response.cookies.set({
-      name: 'auth-token',
-      value: token,
-      httpOnly: true,
-      secure: !isLocalhost, // Secure in production
-      sameSite: 'lax',
-      path: '/',
-      domain: cookieDomain, // Use the determined domain
-      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
-    });
-
-    // Log successful login
-    console.log(`User logged in: ${email}`);
-
+    // Clear cookies
+    response.cookies.delete('access-token');
+    response.cookies.delete('refresh-token');
+    
     return response;
+    
   } catch (error) {
-    console.error('LOGIN_ERROR:', error);
-    return NextResponse.json(
-      { success: false, error: 'An error occurred during login.' },
-      { status: 500 }
-    );
+    console.error('Logout error:', error);
+    // Even if logout fails, clear cookies
+    const response = NextResponse.json({
+      success: true,
+      message: 'Logout completed'
+    });
+    
+    response.cookies.delete('access-token');
+    response.cookies.delete('refresh-token');
+    
+    return response;
   }
 }
+
+// Refresh token handler
+async function handleRefreshToken(request: NextRequest): Promise<NextResponse> {
+  const refreshToken = request.cookies.get('refresh-token')?.value;
+  
+  if (!refreshToken) {
+    throw ErrorFactory.authentication('Refresh token required');
+  }
+  
+  try {
+    // Verify refresh token
+    const decoded = JWTUtils.verifyRefreshToken(refreshToken);
+    
+    // Validate session
+    const isValidSession = await SessionUtils.validateSession(refreshToken);
+    if (!isValidSession) {
+      throw ErrorFactory.authentication('Invalid session');
+    }
+    
+    // Get user
+    const user = await UserUtils.getUserById(decoded.userId);
+    if (!user) {
+      throw ErrorFactory.authentication('User not found');
+    }
+    
+    // Generate new access token
+    const newAccessToken = JWTUtils.generateAccessToken(user);
+    
+    // Create response
+    const response = NextResponse.json({
+      success: true,
+      data: {
+        accessToken: newAccessToken,
+        user: UserUtils.sanitizeUser(user)
+      }
+    });
+    
+    // Update access token cookie
+    response.cookies.set('access-token', newAccessToken, COOKIE_OPTIONS);
+    
+    return response;
+    
+  } catch (error) {
+    // Clear invalid tokens
+    const response = NextResponse.json({
+      success: false,
+      error: 'Token refresh failed'
+    }, { status: 401 });
+    
+    response.cookies.delete('access-token');
+    response.cookies.delete('refresh-token');
+    
+    return response;
+  }
+}
+
+// Main route handler
+async function handleAuthRequest(request: NextRequest): Promise<NextResponse> {
+  const method = request.method;
+  const url = new URL(request.url);
+  const action = url.searchParams.get('action');
+  
+  switch (method) {
+    case 'POST':
+      if (action === 'logout') {
+        return handleLogout(request);
+      } else if (action === 'refresh') {
+        return handleRefreshToken(request);
+      } else {
+        return handleLogin(request);
+      }
+      
+    default:
+      throw ErrorFactory.validation(`Method ${method} not allowed`);
+  }
+}
+
+// Export handlers with error handling
+export const POST = withErrorHandler(handleAuthRequest);
+
 
