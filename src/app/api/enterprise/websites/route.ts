@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '@/lib/mongodb';
+import { connectToDatabase } from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 
 // GET - Retrieve all websites for the Enterprise user
