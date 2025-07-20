@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '@/lib/mongodb';
+import { connectToDatabase } from '../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 import { LogoutButton } from './LogoutButton';
 
