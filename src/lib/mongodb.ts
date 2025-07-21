@@ -308,7 +308,7 @@ export class DatabaseUtils {
 }
 
 // Export default connection function
-export default connectToDatabase;
+export default { connectToDatabase };
 
 // Performance monitoring
 export class MongoPerformanceMonitor {
