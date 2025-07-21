@@ -40,13 +40,8 @@ const MONGODB_OPTIONS: MongoClientOptions = {
   retryWrites: true,
   retryReads: true,
   
-  // Buffer Settings
-  bufferMaxEntries: 0, // Disable mongoose buffering
-  bufferCommands: false,
-  
   // SSL/TLS Settings for Production
   ssl: true,
-  sslValidate: true,
   
   // Application Name for Monitoring
   appName: 'AFFILIFY-Production'
@@ -353,5 +348,6 @@ export class MongoPerformanceMonitor {
     }
   }
 }
+
 
 
