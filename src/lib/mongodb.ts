@@ -307,8 +307,14 @@ export class DatabaseUtils {
   }
 }
 
-// Export default connection function
-export default { connectToDatabase };
+// Create a client promise for compatibility with imports
+const clientPromise = (async () => {
+  const { client } = await connectToDatabase();
+  return client;
+})();
+
+// Export clientPromise as default for compatibility with imports
+export default clientPromise;
 
 // Performance monitoring
 export class MongoPerformanceMonitor {
