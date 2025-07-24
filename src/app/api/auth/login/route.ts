@@ -183,5 +183,3 @@ async function handleAuthRequest(request: NextRequest): Promise<NextResponse> {
 
 // Export handlers with error handling
 export const POST = withErrorHandler(handleAuthRequest);
-
-
