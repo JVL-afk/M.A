@@ -77,8 +77,8 @@ function CheckoutForm() {
         body: JSON.stringify({
           priceId: `price_${plan}_monthly`,
           planName: plan,
-          userId: 'user_123', // Replace with actual user ID from auth
-          userEmail: 'user@example.com' // Replace with actual user email
+          userId: 'user_123', // TODO: Get from authenticated user context
+          userEmail: 'user@affilify.com' // TODO: Get from authenticated user context
         }),
       })
 
