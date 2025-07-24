@@ -19,8 +19,8 @@ async function getDashboardData() {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-default-secret-key-for-development') as { userId: string };
     if (!decoded.userId) return null;
 
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
+    const connection = await connectToDatabase();
+    const db = connection.db;
     
     const [user, analytics] = await Promise.all([
       db.collection('users').findOne({ _id: new ObjectId(decoded.userId) }, { projection: { password: 0 } }),
@@ -154,6 +154,4 @@ export default async function DashboardPage() {
     </div>
   );
 }
-
-
 
