@@ -397,7 +397,7 @@ export class HealthMonitor {
   
   static getErrorStats(): Record<string, number> {
     const stats: Record<string, number> = {};
-    for (const [type, count] of this.errorCounts.entries()) {
+    for (const [type, count] of Array.from(this.errorCounts.entries())) {
       stats[type] = count;
     }
     return stats;
