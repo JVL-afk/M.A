@@ -1,0 +1,321 @@
+'use client';
+
+import { useState } from 'react';
+
+export default function TestAffiliateLinkGeneration() {
+  const [affiliateLink, setAffiliateLink] = useState('');
+  const [niche, setNiche] = useState('');
+  const [product, setProduct] = useState('');
+  const [audience, setAudience] = useState('');
+  const [features, setFeatures] = useState('');
+  const [callToAction, setCallToAction] = useState('');
+  const [template, setTemplate] = useState('Simple Landing Page');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState('');
+
+  const handleGenerate = async () => {
+    if (!affiliateLink.trim()) {
+      setError('Affiliate link is required');
+      return;
+    }
+
+    setIsGenerating(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const response = await fetch('/api/ai/generate-from-link', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          affiliateLink: affiliateLink.trim(),
+          niche: niche.trim() || undefined,
+          product: product.trim() || undefined,
+          audience: audience.trim() || undefined,
+          features: features.trim() || undefined,
+          callToAction: callToAction.trim() || undefined,
+          template: template
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setResult(data);
+      } else {
+        setError(data.error || 'Failed to generate website');
+      }
+    } catch (err) {
+      setError('Network error occurred');
+      console.error('Generation error:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold text-white mb-4">
+            🔗 AFFILIFY Enhanced AI Generator Test
+          </h1>
+          <p className="text-xl text-purple-200">
+            Generate professional affiliate websites from just an affiliate link!
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Configuration Panel */}
+          <div className="bg-black/30 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30">
+            <h2 className="text-2xl font-bold text-white mb-6">Website Configuration</h2>
+            
+            {/* Primary Input - Affiliate Link */}
+            <div className="mb-6 p-4 bg-gradient-to-r from-orange-500/20 to-red-500/20 rounded-lg border border-orange-500/50">
+              <label className="block text-orange-300 text-sm font-medium mb-2">
+                🔗 Affiliate Link (Required)
+              </label>
+              <input
+                type="url"
+                value={affiliateLink}
+                onChange={(e) => setAffiliateLink(e.target.value)}
+                placeholder="https://amazon.com/dp/B08N5WRWNW or any affiliate link"
+                className="w-full px-4 py-3 bg-black/50 border border-orange-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-400/20"
+              />
+              <p className="text-orange-200 text-xs mt-2">
+                🎯 AI will analyze this link and generate everything automatically!
+              </p>
+            </div>
+
+            {/* Optional Context Fields */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-purple-300 mb-3">
+                📝 Optional Context (AI will auto-generate if empty)
+              </h3>
+              
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Niche/Industry (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={niche}
+                  onChange={(e) => setNiche(e.target.value)}
+                  placeholder="e.g., fitness, tech, beauty (AI will detect from link)"
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Product/Service (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={product}
+                  onChange={(e) => setProduct(e.target.value)}
+                  placeholder="e.g., wireless earbuds (AI will extract from link)"
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Target Audience (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={audience}
+                  onChange={(e) => setAudience(e.target.value)}
+                  placeholder="e.g., busy professionals (AI will determine best audience)"
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Key Features (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={features}
+                  onChange={(e) => setFeatures(e.target.value)}
+                  placeholder="e.g., noise-canceling, long battery (AI will extract features)"
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Call to Action (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={callToAction}
+                  onChange={(e) => setCallToAction(e.target.value)}
+                  placeholder="e.g., Buy Now (AI will generate appropriate CTA)"
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:border-purple-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-purple-300 text-sm font-medium mb-2">
+                  Template (Optional)
+                </label>
+                <select
+                  value={template}
+                  onChange={(e) => setTemplate(e.target.value)}
+                  className="w-full px-4 py-2 bg-black/50 border border-purple-500/50 rounded-lg text-white focus:outline-none focus:border-purple-400"
+                >
+                  <option value="Simple Landing Page">Simple Landing Page</option>
+                  <option value="Modern Sales Page">Modern Sales Page</option>
+                  <option value="Product Showcase">Product Showcase</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || !affiliateLink.trim()}
+              className="w-full mt-6 px-6 py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-lg hover:from-orange-600 hover:to-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105"
+            >
+              {isGenerating ? '🤖 Analyzing Link & Generating...' : '🚀 Generate from Affiliate Link'}
+            </button>
+
+            {error && (
+              <div className="mt-4 p-4 bg-red-500/20 border border-red-500/50 rounded-lg">
+                <p className="text-red-200">{error}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Results Panel */}
+          <div className="bg-black/30 backdrop-blur-sm rounded-2xl p-6 border border-purple-500/30">
+            <h2 className="text-2xl font-bold text-white mb-6">Generated Website</h2>
+            
+            {isGenerating && (
+              <div className="flex flex-col items-center justify-center py-12">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mb-4"></div>
+                <p className="text-purple-200 text-center">
+                  🔍 Analyzing affiliate link...<br/>
+                  🤖 Extracting product data...<br/>
+                  ✍️ Generating professional website...
+                </p>
+              </div>
+            )}
+
+            {result && (
+              <div className="space-y-6">
+                {/* Success Message */}
+                <div className="p-4 bg-green-500/20 border border-green-500/50 rounded-lg">
+                  <p className="text-green-200 font-medium">✅ Website Generated Successfully!</p>
+                  <p className="text-green-300 text-sm mt-1">
+                    Website URL: <a href={result.websiteUrl} target="_blank" rel="noopener noreferrer" className="underline">{result.websiteUrl}</a>
+                  </p>
+                </div>
+
+                {/* Scraped Product Data */}
+                {result.scrapedData && (
+                  <div className="p-4 bg-blue-500/20 border border-blue-500/50 rounded-lg">
+                    <h3 className="text-blue-200 font-medium mb-2">🔍 Scraped Product Data:</h3>
+                    <div className="text-blue-100 text-sm space-y-1">
+                      <p><strong>Title:</strong> {result.scrapedData.title}</p>
+                      <p><strong>Category:</strong> {result.scrapedData.category}</p>
+                      <p><strong>Brand:</strong> {result.scrapedData.brand || 'Not detected'}</p>
+                      <p><strong>Price:</strong> {result.scrapedData.price || 'Not detected'}</p>
+                      <p><strong>Features:</strong> {result.scrapedData.features.join(', ')}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Generated Website Content */}
+                <div className="p-4 bg-purple-500/20 border border-purple-500/50 rounded-lg">
+                  <h3 className="text-purple-200 font-medium mb-2">🎯 Generated Website Content:</h3>
+                  
+                  {result.websiteData && result.websiteData.websiteTitle && (
+                    <div className="text-purple-100 text-sm space-y-3">
+                      <div>
+                        <strong className="text-purple-200">Website Title:</strong>
+                        <p className="mt-1">{result.websiteData.websiteTitle}</p>
+                      </div>
+                      
+                      {result.websiteData.heroSection && (
+                        <div>
+                          <strong className="text-purple-200">Hero Section:</strong>
+                          <p className="mt-1"><strong>Headline:</strong> {result.websiteData.heroSection.headline}</p>
+                          <p className="mt-1"><strong>Subheadline:</strong> {result.websiteData.heroSection.subheadline}</p>
+                        </div>
+                      )}
+                      
+                      {result.websiteData.featuresSection && (
+                        <div>
+                          <strong className="text-purple-200">Features:</strong>
+                          <ul className="mt-1 space-y-1">
+                            {result.websiteData.featuresSection.features?.map((feature: any, index: number) => (
+                              <li key={index}>
+                                <strong>{feature.title}:</strong> {feature.description}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {result.websiteData.testimonialsSection && (
+                        <div>
+                          <strong className="text-purple-200">Testimonials:</strong>
+                          <div className="mt-1 space-y-2">
+                            {result.websiteData.testimonialsSection.testimonials?.map((testimonial: any, index: number) => (
+                              <div key={index} className="bg-black/30 p-2 rounded">
+                                <p><strong>{testimonial.name}:</strong> "{testimonial.text}" ⭐{testimonial.rating}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Configuration Used */}
+                <div className="p-4 bg-gray-500/20 border border-gray-500/50 rounded-lg">
+                  <h3 className="text-gray-200 font-medium mb-2">⚙️ Final Configuration Used:</h3>
+                  <div className="text-gray-100 text-sm space-y-1">
+                    <p><strong>Affiliate Link:</strong> {result.config.affiliateLink}</p>
+                    <p><strong>Niche:</strong> {result.config.niche}</p>
+                    <p><strong>Product:</strong> {result.config.product}</p>
+                    <p><strong>Audience:</strong> {result.config.audience}</p>
+                    <p><strong>Features:</strong> {Array.isArray(result.config.features) ? result.config.features.join(', ') : result.config.features}</p>
+                    <p><strong>CTA:</strong> {result.config.callToAction}</p>
+                  </div>
+                </div>
+
+                {/* Raw AI Output */}
+                <details className="p-4 bg-black/50 border border-gray-500/50 rounded-lg">
+                  <summary className="text-gray-200 font-medium cursor-pointer">🤖 Raw AI Output (Click to expand)</summary>
+                  <pre className="text-gray-300 text-xs mt-2 whitespace-pre-wrap overflow-auto max-h-64">
+                    {result.generatedContent}
+                  </pre>
+                </details>
+              </div>
+            )}
+
+            {!isGenerating && !result && (
+              <div className="flex items-center justify-center py-12">
+                <p className="text-purple-200 text-center">
+                  🔗 Paste an affiliate link above and click generate to see the magic!<br/>
+                  <span className="text-sm text-purple-300 mt-2 block">
+                    AI will analyze the product and create a complete website automatically
+                  </span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
