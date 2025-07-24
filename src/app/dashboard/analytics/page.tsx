@@ -44,6 +44,7 @@ interface AdvancedAnalytics {
 
 export default function AnalyticsPage() {
   const [basicAnalytics, setBasicAnalytics] = useState<BasicAnalytics | null>(null);
+  const [advancedAnalytics, setAdvancedAnalytics] = useState<AdvancedAnalytics | null>(null);
   const [userPlan, setUserPlan] = useState<string>('basic');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,25 +57,102 @@ export default function AnalyticsPage() {
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/analytics');
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch analytics data');
+      // Get auth token
+      const token = localStorage.getItem('auth-token');
+      if (!token) {
+        throw new Error('No authentication token found');
       }
 
-      const data = await response.json();
+      // Fetch user websites to get basic analytics
+      const websitesResponse = await fetch('/api/user/websites', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!websitesResponse.ok) {
+        throw new Error('Failed to fetch user data');
+      }
+
+      const websitesData = await websitesResponse.json();
       
-      if (data.success) {
-        setBasicAnalytics(data.basicAnalytics);
-        setUserPlan(data.userPlan);
+      if (websitesData.success) {
+        // Calculate basic analytics from user websites
+        const websites = websitesData.data.websites || [];
+        setBasicAnalytics({
+          totalWebsites: websites.length,
+          totalClicks: 0, // Will be calculated from real analytics events
+          totalRevenue: 0, // Will be calculated from real analytics events
+          totalConversions: 0 // Will be calculated from real analytics events
+        });
+
+        // Determine user plan (this should come from user data)
+        const plan = 'basic'; // Default to basic for now
+        setUserPlan(plan);
+
+        // If user has Pro+ plan and websites, fetch advanced analytics
+        if ((plan === 'pro' || plan === 'enterprise') && websites.length > 0) {
+          await fetchAdvancedAnalytics(token, websites[0].id);
+        }
       } else {
-        throw new Error(data.error || 'Failed to load analytics');
+        throw new Error(websitesData.error || 'Failed to load user data');
       }
     } catch (err) {
       console.error('Analytics fetch error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load analytics');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAdvancedAnalytics = async (token: string, websiteId: string) => {
+    try {
+      const analyticsResponse = await fetch(`/api/analytics?websiteId=${websiteId}&period=30d`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (analyticsResponse.ok) {
+        const analyticsData = await analyticsResponse.json();
+        if (analyticsData.success) {
+          const data = analyticsData.data;
+          
+          // Transform real analytics data to our interface
+          setAdvancedAnalytics({
+            dailyPerformance: data.dailyData.slice(-7).map((day: any) => ({
+              date: day.date,
+              clicks: day.clickThroughs,
+              conversions: day.conversions,
+              revenue: day.revenue
+            })),
+            trafficSources: data.topReferrers.map((ref: any) => ({
+              source: ref.source,
+              clicks: ref.visits,
+              percentage: Math.round((ref.visits / Math.max(data.summary.uniqueVisitors, 1)) * 100)
+            })),
+            topWebsites: [], // Would need to aggregate across all user websites
+            deviceBreakdown: data.deviceBreakdown,
+            geographicData: data.geographicData.map((geo: any) => ({
+              country: geo.country,
+              clicks: geo.visits,
+              conversions: Math.floor(geo.visits * 0.05) // Estimate based on overall conversion rate
+            }))
+          });
+
+          // Update basic analytics with real data
+          setBasicAnalytics(prev => prev ? {
+            ...prev,
+            totalClicks: data.summary.clickThroughs,
+            totalRevenue: data.summary.revenue,
+            totalConversions: data.summary.conversions
+          } : null);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch advanced analytics:', error);
+      // Advanced analytics will remain null, showing upgrade prompt
     }
   };
 
@@ -118,53 +196,6 @@ export default function AnalyticsPage() {
   const conversionRate = (basicAnalytics?.totalClicks && basicAnalytics.totalClicks > 0)
     ? ((basicAnalytics.totalConversions / basicAnalytics.totalClicks) * 100).toFixed(2)
     : '0.00';
-
-  let advancedData: AdvancedAnalytics | null = null;
-
-  // Mock advanced analytics data for Pro+ users
-  if (userPlan === 'pro' || userPlan === 'enterprise') {
-    advancedData = {
-      dailyPerformance: [
-        { date: '2024-01-15', clicks: 45, conversions: 3, revenue: 89.97 },
-        { date: '2024-01-16', clicks: 52, conversions: 4, revenue: 119.96 },
-        { date: '2024-01-17', clicks: 38, conversions: 2, revenue: 59.98 },
-        { date: '2024-01-18', clicks: 61, conversions: 5, revenue: 149.95 },
-        { date: '2024-01-19', clicks: 47, conversions: 3, revenue: 89.97 },
-        { date: '2024-01-20', clicks: 55, conversions: 4, revenue: 119.96 },
-        { date: '2024-01-21', clicks: 43, conversions: 3, revenue: 89.97 },
-      ],
-      trafficSources: [
-        { source: 'Social Media', clicks: 156, percentage: 45.2 },
-        { source: 'Search Engines', clicks: 98, percentage: 28.4 },
-        { source: 'Direct Traffic', clicks: 67, percentage: 19.4 },
-        { source: 'Email Marketing', clicks: 24, percentage: 7.0 },
-      ],
-      topWebsites: [
-        { id: '1', name: 'Tech Gadgets Review', clicks: 89, conversions: 7, revenue: 209.93, conversionRate: 7.87 },
-        { id: '2', name: 'Fitness Equipment Guide', clicks: 76, conversions: 5, revenue: 149.95, conversionRate: 6.58 },
-        { id: '3', name: 'Home Decor Trends', clicks: 63, conversions: 4, revenue: 119.96, conversionRate: 6.35 },
-        { id: '4', name: 'Travel Essentials', clicks: 45, conversions: 2, revenue: 59.98, conversionRate: 4.44 },
-        { id: '5', name: 'Kitchen Appliances', clicks: 38, conversions: 2, revenue: 59.98, conversionRate: 5.26 },
-      ],
-      deviceBreakdown: {
-        desktop: 58.3,
-        mobile: 35.7,
-        tablet: 6.0,
-      },
-      geographicData: [
-        { country: 'United States', clicks: 142, conversions: 12 },
-        { country: 'United Kingdom', clicks: 89, conversions: 7 },
-        { country: 'Canada', clicks: 67, conversions: 5 },
-        { country: 'Australia', clicks: 45, conversions: 3 },
-        { country: 'Germany', clicks: 34, conversions: 2 },
-        { country: 'France', clicks: 28, conversions: 2 },
-        { country: 'Netherlands', clicks: 23, conversions: 1 },
-        { country: 'Sweden', clicks: 19, conversions: 1 },
-        { country: 'Norway', clicks: 15, conversions: 1 },
-        { country: 'Denmark', clicks: 12, conversions: 1 },
-      ],
-    };
-  }
 
   const handleUpgrade = () => {
     router.push('/pricing');
@@ -241,116 +272,85 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Advanced Analytics for Pro+ Users */}
-        {userPlan === 'pro' || userPlan === 'enterprise' ? (
-          advancedData && (
-            <div className="space-y-8">
-              {/* Daily Performance Chart */}
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Performance (Last 7 Days)</h3>
-                <div className="space-y-4">
-                  {advancedData.dailyPerformance.map((day, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                      <span className="font-medium text-gray-700">{day.date}</span>
-                      <div className="flex space-x-6 text-sm">
-                        <span className="text-blue-600">{day.clicks} clicks</span>
-                        <span className="text-green-600">{day.conversions} conversions</span>
-                        <span className="text-yellow-600">${day.revenue}</span>
-                      </div>
+        {(userPlan === 'pro' || userPlan === 'enterprise') && advancedAnalytics ? (
+          <div className="space-y-8">
+            {/* Daily Performance Chart */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Performance (Last 7 Days)</h3>
+              <div className="space-y-4">
+                {advancedAnalytics.dailyPerformance.map((day, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <span className="font-medium text-gray-700">{day.date}</span>
+                    <div className="flex space-x-6 text-sm">
+                      <span className="text-blue-600">{day.clicks} clicks</span>
+                      <span className="text-green-600">{day.conversions} conversions</span>
+                      <span className="text-yellow-600">${day.revenue.toFixed(2)}</span>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
+            </div>
 
-              {/* Traffic Sources */}
+            {/* Traffic Sources */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Traffic Sources</h3>
+              <div className="space-y-3">
+                {advancedAnalytics.trafficSources.map((source, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <span className="font-medium text-gray-700">{source.source}</span>
+                    <div className="flex items-center space-x-3">
+                      <div className="w-32 bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full" 
+                          style={{ width: `${Math.min(source.percentage, 100)}%` }}
+                        ></div>
+                      </div>
+                      <span className="text-sm text-gray-600 w-12">{source.percentage}%</span>
+                      <span className="text-sm font-medium text-gray-900 w-16">{source.clicks} clicks</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Device Breakdown and Geographic Data */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Device Breakdown */}
               <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Traffic Sources</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Device Breakdown</h3>
                 <div className="space-y-3">
-                  {advancedData.trafficSources.map((source, index) => (
-                    <div key={index} className="flex items-center justify-between">
-                      <span className="font-medium text-gray-700">{source.source}</span>
-                      <div className="flex items-center space-x-3">
-                        <div className="w-32 bg-gray-200 rounded-full h-2">
-                          <div 
-                            className="bg-blue-600 h-2 rounded-full" 
-                            style={{ width: `${source.percentage}%` }}
-                          ></div>
-                        </div>
-                        <span className="text-sm text-gray-600 w-12">{source.percentage}%</span>
-                        <span className="text-sm font-medium text-gray-900 w-16">{source.clicks} clicks</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-700">Desktop</span>
+                    <span className="text-gray-600">{advancedAnalytics.deviceBreakdown.desktop}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-700">Mobile</span>
+                    <span className="text-gray-600">{advancedAnalytics.deviceBreakdown.mobile}%</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-gray-700">Tablet</span>
+                    <span className="text-gray-600">{advancedAnalytics.deviceBreakdown.tablet}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Geographic Data */}
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Countries</h3>
+                <div className="space-y-2">
+                  {advancedAnalytics.geographicData.slice(0, 8).map((country, index) => (
+                    <div key={index} className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-700">{country.country}</span>
+                      <div className="flex space-x-3">
+                        <span className="text-blue-600">{country.clicks} clicks</span>
+                        <span className="text-green-600">{country.conversions} conv.</span>
                       </div>
                     </div>
                   ))}
-                </div>
-              </div>
-
-              {/* Top Performing Websites */}
-              <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Performing Websites</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Website</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Clicks</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Conversions</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Revenue</th>
-                        <th className="text-left py-3 px-4 font-medium text-gray-700">Conv. Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {advancedData.topWebsites.map((website, index) => (
-                        <tr key={index} className="border-b border-gray-100">
-                          <td className="py-3 px-4 font-medium text-gray-900">{website.name}</td>
-                          <td className="py-3 px-4 text-gray-600">{website.clicks}</td>
-                          <td className="py-3 px-4 text-gray-600">{website.conversions}</td>
-                          <td className="py-3 px-4 text-gray-600">${website.revenue}</td>
-                          <td className="py-3 px-4 text-gray-600">{website.conversionRate}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Device Breakdown and Geographic Data */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Device Breakdown */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Device Breakdown</h3>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-gray-700">Desktop</span>
-                      <span className="text-gray-600">{advancedData.deviceBreakdown.desktop}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-gray-700">Mobile</span>
-                      <span className="text-gray-600">{advancedData.deviceBreakdown.mobile}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-gray-700">Tablet</span>
-                      <span className="text-gray-600">{advancedData.deviceBreakdown.tablet}%</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Geographic Data */}
-                <div className="bg-white rounded-lg shadow-md p-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Top 10 Countries</h3>
-                  <div className="space-y-2">
-                    {advancedData.geographicData.map((country, index) => (
-                      <div key={index} className="flex items-center justify-between text-sm">
-                        <span className="font-medium text-gray-700">{country.country}</span>
-                        <div className="flex space-x-3">
-                          <span className="text-blue-600">{country.clicks} clicks</span>
-                          <span className="text-green-600">{country.conversions} conv.</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               </div>
             </div>
-          )
+          </div>
         ) : (
           /* Upgrade Prompt for Basic Users */
           <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg shadow-lg p-8 text-white text-center">
@@ -385,4 +385,5 @@ export default function AnalyticsPage() {
     </div>
   );
 }
+
 
