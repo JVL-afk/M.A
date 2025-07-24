@@ -105,7 +105,7 @@ export default function AnalyzeWebsitePage() {
                     type="url"
                     id="url"
                     name="url"
-                    placeholder="https://example.com"
+                    placeholder="https://www.amazon.com/dp/B08N5WRWNW or any website URL"
                     required
                     className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-purple-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                   />
@@ -319,4 +319,3 @@ export default function AnalyzeWebsitePage() {
     </div>
   );
 }
-
