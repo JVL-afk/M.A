@@ -136,11 +136,10 @@ export class RateLimiter {
   
   constructor(config: RateLimitConfig) {
     this.config = {
-      windowMs: 60000, // Default 1 minute
-      maxRequests: 100, // Default 100 requests
-      keyGenerator: this.defaultKeyGenerator,
-      message: 'Too many requests, please try again later.',
-      ...config
+      windowMs: config.windowMs || 60000, // Default 1 minute
+      maxRequests: config.maxRequests || 100, // Default 100 requests
+      keyGenerator: config.keyGenerator || this.defaultKeyGenerator,
+      message: config.message || 'Too many requests, please try again later.',
     };
     
     // Use Redis in production, memory store in development
@@ -207,7 +206,7 @@ export class RateLimiter {
         allowed: true,
         limit: this.config.maxRequests,
         remaining: this.config.maxRequests,
-        resetTime: now + this.config.windowMs
+        resetTime: Date.now() + this.config.windowMs
       };
     }
   }
@@ -374,7 +373,7 @@ export async function rateLimit(
   
   const result = await limiter.checkLimit(request);
   
-  const headers = {
+  const headers: Record<string, string> = {
     'X-RateLimit-Limit': result.limit.toString(),
     'X-RateLimit-Remaining': result.remaining.toString(),
     'X-RateLimit-Reset': new Date(result.resetTime).toISOString()
@@ -396,3 +395,4 @@ export async function rateLimit(
 export const userRateLimiter = new UserRateLimiter();
 
 export default RateLimiter;
+
