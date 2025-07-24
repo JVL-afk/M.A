@@ -36,8 +36,8 @@ export async function POST(request: NextRequest) {
     }
 
     // --- 3. Connect to Database ---
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
+    const connection = await connectToDatabase();
+    const db = connection.db;
     const usersCollection = db.collection('users');
 
     // --- 4. Check for Existing User ---
