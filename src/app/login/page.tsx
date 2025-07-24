@@ -31,9 +31,14 @@ export default function LoginPage() {
         localStorage.setItem('userEmail', email);
         router.push('/dashboard'); // Redirect to the dashboard page
       } else {
-        setError(data.error || 'Login failed. Please check your credentials.');
+        // Handle both string errors and error objects
+        const errorMessage = typeof data.error === 'string' 
+          ? data.error 
+          : data.error?.message || data.message || 'Login failed. Please check your credentials.';
+        setError(errorMessage);
       }
     } catch (err) {
+      console.error('Login error:', err);
       setError('An error occurred. Please try again.');
     } finally {
       setLoading(false);
