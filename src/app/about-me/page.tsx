@@ -1,6 +1,7 @@
-import Link from 'next/link'
+import Link from 'next/link',
+import Navbar from '../../components/Navbar';
 
-export default function AboutPage() {
+export default function AboutMe() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black">
       <Navbar />
