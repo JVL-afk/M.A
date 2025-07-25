@@ -1,6 +1,6 @@
 // FILE LOCATION: src/app/features/lightning-fast/page.tsx
 // This file fixes the "Navbar is not defined" error for the lightning-fast feature page
-
+import link from 'next/link';
 import Navbar from '../../../components/Navbar';
 
 export default function LightningFast() {
