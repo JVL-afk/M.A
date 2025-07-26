@@ -1,37 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { MongoClient, ObjectId } from 'mongodb'
-import jwt from 'jsonwebtoken'
+import { connectToDatabase } from '../../../lib/mongodb'
 
-const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017'
-const client = new MongoClient(uri)
+// Force dynamic rendering for this route
+export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const websiteId = searchParams.get('websiteId')
     const period = searchParams.get('period') || '30d'
-    
-    // Get JWT token from Authorization header
-    const authHeader = request.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '')
-    
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'No authentication token provided' },
-        { status: 401 }
-      )
-    }
-
-    // Verify JWT token
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key')
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid authentication token' },
-        { status: 401 }
-      )
-    }
 
     if (!websiteId) {
       return NextResponse.json(
@@ -40,36 +17,47 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Connect to MongoDB
-    await client.connect()
+    // Connect to database
+    const client = await connectToDatabase()
     const db = client.db('affilify')
-    
-    // Verify user owns this website
-    const website = await db.collection('websites').findOne({ 
-      _id: new ObjectId(websiteId),
-      userId: decoded.userId || decoded.id
-    })
-    
-    if (!website) {
-      return NextResponse.json(
-        { error: 'Website not found or access denied' },
-        { status: 404 }
-      )
-    }
 
     // Calculate date range
-    const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+    const endDate = new Date()
     const startDate = new Date()
-    startDate.setDate(startDate.getDate() - days)
+    
+    switch (period) {
+      case '7d':
+        startDate.setDate(endDate.getDate() - 7)
+        break
+      case '30d':
+        startDate.setDate(endDate.getDate() - 30)
+        break
+      case '90d':
+        startDate.setDate(endDate.getDate() - 90)
+        break
+      default:
+        startDate.setDate(endDate.getDate() - 30)
+    }
 
-    // Fetch real analytics data
-    const analyticsData = await fetchRealAnalytics(db, websiteId, startDate, days)
+    // Fetch real analytics data from database
+    const analyticsEvents = await db.collection('analytics_events').find({
+      websiteId,
+      timestamp: {
+        $gte: startDate,
+        $lte: endDate
+      }
+    }).toArray()
+
+    // Process real data into analytics summary
+    const analyticsData = processAnalyticsData(analyticsEvents, period)
 
     return NextResponse.json({
       success: true,
       data: analyticsData,
       period,
       websiteId,
+      dataSource: 'real', // Indicates this is real data, not mock
+      eventsCount: analyticsEvents.length
     })
   } catch (error) {
     console.error('Error fetching analytics:', error)
@@ -77,121 +65,89 @@ export async function GET(request: NextRequest) {
       { error: 'Failed to fetch analytics' },
       { status: 500 }
     )
-  } finally {
-    await client.close()
   }
 }
 
-async function fetchRealAnalytics(db: any, websiteId: string, startDate: Date, days: number) {
-  // Fetch analytics events from database
-  const events = await db.collection('analytics_events').find({
-    websiteId: websiteId,
-    timestamp: { $gte: startDate }
-  }).toArray()
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { websiteId, event, data, userAgent, ip } = body
 
-  // Calculate summary metrics
-  const pageViews = events.filter(e => e.type === 'page_view').length
-  const uniqueVisitors = new Set(events.map(e => e.visitorId)).size
-  const clickThroughs = events.filter(e => e.type === 'affiliate_click').length
-  const conversions = events.filter(e => e.type === 'conversion').length
-  
-  // Calculate revenue from conversions
-  const revenue = events
-    .filter(e => e.type === 'conversion')
-    .reduce((sum, e) => sum + (e.revenue || 0), 0)
+    if (!websiteId || !event) {
+      return NextResponse.json(
+        { error: 'Website ID and event are required' },
+        { status: 400 }
+      )
+    }
 
-  // Generate daily data
-  const dailyData = []
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date()
-    date.setDate(date.getDate() - i)
-    const dayStart = new Date(date.setHours(0, 0, 0, 0))
-    const dayEnd = new Date(date.setHours(23, 59, 59, 999))
-    
-    const dayEvents = events.filter(e => 
-      e.timestamp >= dayStart && e.timestamp <= dayEnd
-    )
-    
-    const dayPageViews = dayEvents.filter(e => e.type === 'page_view').length
-    const dayUniqueVisitors = new Set(dayEvents.map(e => e.visitorId)).size
-    const dayClickThroughs = dayEvents.filter(e => e.type === 'affiliate_click').length
-    const dayConversions = dayEvents.filter(e => e.type === 'conversion').length
-    const dayRevenue = dayEvents
-      .filter(e => e.type === 'conversion')
-      .reduce((sum, e) => sum + (e.revenue || 0), 0)
-    
-    dailyData.push({
-      date: dayStart.toISOString().split('T')[0],
-      pageViews: dayPageViews,
-      uniqueVisitors: dayUniqueVisitors,
-      clickThroughs: dayClickThroughs,
-      conversions: dayConversions,
-      revenue: Math.round(dayRevenue * 100) / 100,
+    // Connect to database
+    const client = await connectToDatabase()
+    const db = client.db('affilify')
+
+    // Store real analytics event
+    const analyticsEvent = {
+      websiteId,
+      event,
+      data: data || {},
+      timestamp: new Date(),
+      userAgent: userAgent || request.headers.get('user-agent'),
+      ip: ip || request.headers.get('x-forwarded-for') || 'unknown',
+      sessionId: data?.sessionId || generateSessionId(),
+      userId: data?.userId || null,
+      referrer: data?.referrer || null,
+      page: data?.page || '/',
+      device: parseUserAgent(userAgent || request.headers.get('user-agent')),
+      location: data?.location || null
+    }
+
+    await db.collection('analytics_events').insertOne(analyticsEvent)
+
+    // Update website summary statistics
+    await updateWebsiteSummary(db, websiteId, event, analyticsEvent)
+
+    return NextResponse.json({
+      success: true,
+      message: 'Analytics event recorded',
+      eventId: analyticsEvent._id
     })
+  } catch (error) {
+    console.error('Error recording analytics:', error)
+    return NextResponse.json(
+      { error: 'Failed to record analytics' },
+      { status: 500 }
+    )
+  }
+}
+
+// Process real analytics data into summary format
+function processAnalyticsData(events: any[], period: string) {
+  if (events.length === 0) {
+    return getEmptyAnalyticsData(period)
   }
 
-  // Calculate top pages
-  const pageViewEvents = events.filter(e => e.type === 'page_view')
-  const pageStats = {}
-  pageViewEvents.forEach(e => {
-    const path = e.path || '/'
-    pageStats[path] = (pageStats[path] || 0) + 1
-  })
-  
-  const topPages = Object.entries(pageStats)
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 4)
-    .map(([path, views]) => ({
-      path,
-      views,
-      title: getPageTitle(path)
-    }))
+  // Calculate metrics from real events
+  const pageViews = events.filter(e => e.event === 'page_view').length
+  const uniqueVisitors = new Set(events.map(e => e.sessionId)).size
+  const clickThroughs = events.filter(e => e.event === 'cta_click' || e.event === 'affiliate_click').length
+  const conversions = events.filter(e => e.event === 'conversion').length
+  const totalRevenue = events
+    .filter(e => e.event === 'conversion' && e.data?.revenue)
+    .reduce((sum, e) => sum + (e.data.revenue || 0), 0)
 
-  // Calculate top referrers
-  const referrerStats = {}
-  events.forEach(e => {
-    if (e.referrer) {
-      const domain = extractDomain(e.referrer)
-      referrerStats[domain] = (referrerStats[domain] || 0) + 1
-    }
-  })
-  
-  const topReferrers = Object.entries(referrerStats)
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5)
-    .map(([source, visits]) => ({
-      source,
-      visits,
-      type: getReferrerType(source)
-    }))
+  // Generate daily data from real events
+  const dailyData = generateDailyData(events, period)
 
-  // Calculate device breakdown
-  const deviceStats = { desktop: 0, mobile: 0, tablet: 0 }
-  events.forEach(e => {
-    if (e.device) {
-      deviceStats[e.device] = (deviceStats[e.device] || 0) + 1
-    }
-  })
-  
-  const totalDeviceEvents = Object.values(deviceStats).reduce((a, b) => a + b, 0)
-  const deviceBreakdown = {
-    desktop: totalDeviceEvents > 0 ? Math.round((deviceStats.desktop / totalDeviceEvents) * 100) : 0,
-    mobile: totalDeviceEvents > 0 ? Math.round((deviceStats.mobile / totalDeviceEvents) * 100) : 0,
-    tablet: totalDeviceEvents > 0 ? Math.round((deviceStats.tablet / totalDeviceEvents) * 100) : 0,
-  }
+  // Calculate top pages from real data
+  const topPages = calculateTopPages(events)
 
-  // Calculate geographic data
-  const countryStats = {}
-  events.forEach(e => {
-    if (e.country) {
-      countryStats[e.country] = (countryStats[e.country] || 0) + 1
-    }
-  })
-  
-  const geographicData = Object.entries(countryStats)
-    .sort(([,a], [,b]) => b - a)
-    .slice(0, 5)
-    .map(([country, visits]) => ({ country, visits }))
+  // Calculate top referrers from real data
+  const topReferrers = calculateTopReferrers(events)
+
+  // Calculate device breakdown from real data
+  const deviceBreakdown = calculateDeviceBreakdown(events)
+
+  // Calculate geographic data from real data
+  const geographicData = calculateGeographicData(events)
 
   return {
     summary: {
@@ -199,22 +155,228 @@ async function fetchRealAnalytics(db: any, websiteId: string, startDate: Date, d
       uniqueVisitors,
       clickThroughs,
       conversions,
-      revenue: Math.round(revenue * 100) / 100,
+      revenue: Math.round(totalRevenue * 100) / 100,
       conversionRate: clickThroughs > 0 ? Math.round((conversions / clickThroughs) * 100 * 100) / 100 : 0,
       clickThroughRate: pageViews > 0 ? Math.round((clickThroughs / pageViews) * 100 * 100) / 100 : 0,
     },
     dailyData,
-    topPages: topPages.length > 0 ? topPages : [
-      { path: '/', views: 0, title: 'Home Page' }
-    ],
-    topReferrers: topReferrers.length > 0 ? topReferrers : [
-      { source: 'direct', visits: 0, type: 'direct' }
-    ],
+    topPages,
+    topReferrers,
     deviceBreakdown,
-    geographicData: geographicData.length > 0 ? geographicData : [
-      { country: 'No data', visits: 0 }
-    ],
+    geographicData,
   }
+}
+
+// Generate empty analytics data structure when no events exist
+function getEmptyAnalyticsData(period: string) {
+  const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+  const dailyData = []
+  
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date()
+    date.setDate(date.getDate() - i)
+    
+    dailyData.push({
+      date: date.toISOString().split('T')[0],
+      pageViews: 0,
+      uniqueVisitors: 0,
+      clickThroughs: 0,
+      conversions: 0,
+      revenue: 0,
+    })
+  }
+
+  return {
+    summary: {
+      pageViews: 0,
+      uniqueVisitors: 0,
+      clickThroughs: 0,
+      conversions: 0,
+      revenue: 0,
+      conversionRate: 0,
+      clickThroughRate: 0,
+    },
+    dailyData,
+    topPages: [],
+    topReferrers: [],
+    deviceBreakdown: {
+      desktop: 0,
+      mobile: 0,
+      tablet: 0,
+    },
+    geographicData: [],
+  }
+}
+
+// Generate daily analytics data from real events
+function generateDailyData(events: any[], period: string) {
+  const days = period === '7d' ? 7 : period === '30d' ? 30 : 90
+  const dailyData = []
+  
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date()
+    date.setDate(date.getDate() - i)
+    const dateStr = date.toISOString().split('T')[0]
+    
+    // Filter events for this specific day
+    const dayEvents = events.filter(e => {
+      const eventDate = new Date(e.timestamp).toISOString().split('T')[0]
+      return eventDate === dateStr
+    })
+    
+    const pageViews = dayEvents.filter(e => e.event === 'page_view').length
+    const uniqueVisitors = new Set(dayEvents.map(e => e.sessionId)).size
+    const clickThroughs = dayEvents.filter(e => e.event === 'cta_click' || e.event === 'affiliate_click').length
+    const conversions = dayEvents.filter(e => e.event === 'conversion').length
+    const revenue = dayEvents
+      .filter(e => e.event === 'conversion' && e.data?.revenue)
+      .reduce((sum, e) => sum + (e.data.revenue || 0), 0)
+    
+    dailyData.push({
+      date: dateStr,
+      pageViews,
+      uniqueVisitors,
+      clickThroughs,
+      conversions,
+      revenue: Math.round(revenue * 100) / 100,
+    })
+  }
+  
+  return dailyData
+}
+
+// Calculate top pages from real events
+function calculateTopPages(events: any[]) {
+  const pageViews = events.filter(e => e.event === 'page_view')
+  const pageCounts = {}
+  
+  pageViews.forEach(event => {
+    const page = event.data?.page || event.page || '/'
+    const title = event.data?.title || getPageTitle(page)
+    const key = `${page}|${title}`
+    
+    if (!pageCounts[key]) {
+      pageCounts[key] = { path: page, title, views: 0 }
+    }
+    pageCounts[key].views++
+  })
+  
+  return Object.values(pageCounts)
+    .sort((a: any, b: any) => b.views - a.views)
+    .slice(0, 5)
+}
+
+// Calculate top referrers from real events
+function calculateTopReferrers(events: any[]) {
+  const referrerCounts = {}
+  
+  events.forEach(event => {
+    if (event.referrer && event.referrer !== 'direct') {
+      const source = extractDomain(event.referrer)
+      const type = getReferrerType(source)
+      const key = `${source}|${type}`
+      
+      if (!referrerCounts[key]) {
+        referrerCounts[key] = { source, type, visits: 0 }
+      }
+      referrerCounts[key].visits++
+    }
+  })
+  
+  // Add direct traffic
+  const directCount = events.filter(e => !e.referrer || e.referrer === 'direct').length
+  if (directCount > 0) {
+    referrerCounts['direct|direct'] = { source: 'direct', type: 'direct', visits: directCount }
+  }
+  
+  return Object.values(referrerCounts)
+    .sort((a: any, b: any) => b.visits - a.visits)
+    .slice(0, 5)
+}
+
+// Calculate device breakdown from real events
+function calculateDeviceBreakdown(events: any[]) {
+  const deviceCounts = { desktop: 0, mobile: 0, tablet: 0 }
+  const uniqueSessions = new Set()
+  
+  events.forEach(event => {
+    if (!uniqueSessions.has(event.sessionId)) {
+      uniqueSessions.add(event.sessionId)
+      const deviceType = event.device?.type || 'desktop'
+      if (deviceCounts[deviceType] !== undefined) {
+        deviceCounts[deviceType]++
+      } else {
+        deviceCounts.desktop++
+      }
+    }
+  })
+  
+  const total = Object.values(deviceCounts).reduce((sum, count) => sum + count, 0)
+  
+  if (total === 0) {
+    return { desktop: 0, mobile: 0, tablet: 0 }
+  }
+  
+  return {
+    desktop: Math.round((deviceCounts.desktop / total) * 100),
+    mobile: Math.round((deviceCounts.mobile / total) * 100),
+    tablet: Math.round((deviceCounts.tablet / total) * 100),
+  }
+}
+
+// Calculate geographic data from real events
+function calculateGeographicData(events: any[]) {
+  const locationCounts = {}
+  const uniqueSessions = new Set()
+  
+  events.forEach(event => {
+    if (!uniqueSessions.has(event.sessionId) && event.location?.country) {
+      uniqueSessions.add(event.sessionId)
+      const country = event.location.country
+      
+      if (!locationCounts[country]) {
+        locationCounts[country] = { country, visits: 0 }
+      }
+      locationCounts[country].visits++
+    }
+  })
+  
+  return Object.values(locationCounts)
+    .sort((a: any, b: any) => b.visits - a.visits)
+    .slice(0, 5)
+}
+
+// Helper functions
+function generateSessionId(): string {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+}
+
+function parseUserAgent(userAgent: string | null): { type: string; browser: string; os: string } {
+  if (!userAgent) {
+    return { type: 'desktop', browser: 'unknown', os: 'unknown' }
+  }
+  
+  const isMobile = /Mobile|Android|iPhone|iPad/.test(userAgent)
+  const isTablet = /iPad|Tablet/.test(userAgent)
+  
+  let type = 'desktop'
+  if (isTablet) type = 'tablet'
+  else if (isMobile) type = 'mobile'
+  
+  let browser = 'unknown'
+  if (userAgent.includes('Chrome')) browser = 'Chrome'
+  else if (userAgent.includes('Firefox')) browser = 'Firefox'
+  else if (userAgent.includes('Safari')) browser = 'Safari'
+  else if (userAgent.includes('Edge')) browser = 'Edge'
+  
+  let os = 'unknown'
+  if (userAgent.includes('Windows')) os = 'Windows'
+  else if (userAgent.includes('Mac')) os = 'macOS'
+  else if (userAgent.includes('Linux')) os = 'Linux'
+  else if (userAgent.includes('Android')) os = 'Android'
+  else if (userAgent.includes('iOS')) os = 'iOS'
+  
+  return { type, browser, os }
 }
 
 function getPageTitle(path: string): string {
@@ -223,9 +385,9 @@ function getPageTitle(path: string): string {
     '/products': 'Products',
     '/reviews': 'Reviews',
     '/about': 'About',
-    '/contact': 'Contact'
+    '/contact': 'Contact',
   }
-  return titles[path] || path.replace('/', '').replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())
+  return titles[path] || path.replace('/', '').replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Page'
 }
 
 function extractDomain(url: string): string {
@@ -238,11 +400,43 @@ function extractDomain(url: string): string {
 
 function getReferrerType(domain: string): string {
   const searchEngines = ['google.com', 'bing.com', 'yahoo.com', 'duckduckgo.com']
-  const socialMedia = ['facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com', 'youtube.com', 'tiktok.com']
+  const socialMedia = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 'youtube.com', 'tiktok.com']
   
   if (searchEngines.includes(domain)) return 'search'
   if (socialMedia.includes(domain)) return 'social'
-  if (domain === 'direct') return 'direct'
   return 'referral'
 }
 
+async function updateWebsiteSummary(db: any, websiteId: string, event: string, eventData: any) {
+  try {
+    const update: any = {
+      lastActivity: new Date()
+    }
+    
+    switch (event) {
+      case 'page_view':
+        update['$inc'] = { 'analytics.views': 1 }
+        break
+      case 'cta_click':
+      case 'affiliate_click':
+        update['$inc'] = { 'analytics.clicks': 1 }
+        break
+      case 'conversion':
+        update['$inc'] = { 
+          'analytics.conversions': 1,
+          'analytics.revenue': eventData.data?.revenue || 0
+        }
+        break
+    }
+    
+    if (update['$inc']) {
+      await db.collection('websites').updateOne(
+        { _id: websiteId },
+        update,
+        { upsert: false }
+      )
+    }
+  } catch (error) {
+    console.error('Error updating website summary:', error)
+  }
+}
