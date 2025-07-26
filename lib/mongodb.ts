@@ -8,33 +8,33 @@ interface MongoConnection {
 
 let cachedConnection: MongoConnection | null = null;
 
-// Production-optimized MongoDB configuration
+// Optimized MongoDB configuration for Vercel deployment
 const MONGODB_OPTIONS: MongoClientOptions = {
-  // Connection Pool Settings for High Concurrency
-  maxPoolSize: 50, // Maximum number of connections in the pool
-  minPoolSize: 5,  // Minimum number of connections in the pool
-  maxIdleTimeMS: 30000, // Close connections after 30 seconds of inactivity
+  // Connection Pool Settings - Reduced for serverless
+  maxPoolSize: 10, // Reduced from 50 for serverless environment
+  minPoolSize: 1,  // Reduced from 5 for serverless environment
+  maxIdleTimeMS: 10000, // Reduced from 30000 for faster cleanup
   
-  // Server Selection and Timeout Settings
-  serverSelectionTimeoutMS: 5000, // How long to try selecting a server
-  socketTimeoutMS: 45000, // How long a send or receive on a socket can take
-  connectTimeoutMS: 10000, // How long to wait for a connection to be established
+  // Server Selection and Timeout Settings - Optimized for serverless
+  serverSelectionTimeoutMS: 3000, // Reduced from 5000 for faster failures
+  socketTimeoutMS: 20000, // Reduced from 45000 for serverless
+  connectTimeoutMS: 5000, // Reduced from 10000 for faster startup
   
-  // Heartbeat and Monitoring
-  heartbeatFrequencyMS: 10000, // How often to check server status
+  // Heartbeat and Monitoring - Reduced frequency
+  heartbeatFrequencyMS: 30000, // Increased from 10000 to reduce overhead
   
   // Write Concern for Data Durability
   writeConcern: {
-    w: 'majority', // Wait for majority of replica set members
-    j: true, // Wait for journal acknowledgment
-    wtimeout: 5000 // Timeout for write concern
+    w: 'majority',
+    j: true,
+    wtimeout: 3000 // Reduced from 5000
   },
   
   // Read Preference for Load Distribution
-  readPreference: 'secondaryPreferred', // Prefer secondary for reads
+  readPreference: 'primary', // Changed from secondaryPreferred for consistency
   
   // Compression for Network Efficiency
-  compressors: ['snappy', 'zlib'],
+  compressors: ['snappy'],
   
   // Retry Logic
   retryWrites: true,
@@ -44,7 +44,7 @@ const MONGODB_OPTIONS: MongoClientOptions = {
   ssl: true,
   
   // Application Name for Monitoring
-  appName: 'AFFILIFY-Production'
+  appName: 'AFFILIFY-Vercel'
 };
 
 // Environment-specific configuration
@@ -56,24 +56,19 @@ const getMongoConfig = () => {
     throw new Error('MONGODB_URI environment variable is required');
   }
   
-  // Validate URI format
-  if (!uri.startsWith('mongodb://') && !uri.startsWith('mongodb+srv://')) {
-    throw new Error('Invalid MongoDB URI format');
-  }
-  
   return { uri, dbName };
 };
 
-// Enhanced connection function with retry logic
+// Enhanced connection function with retry logic and better error handling
 export async function connectToDatabase(): Promise<MongoConnection> {
-  // Return cached connection if available
+  // Return cached connection if available and healthy
   if (cachedConnection) {
     try {
-      // Ping to ensure connection is still alive
+      // Quick ping to ensure connection is still alive
       await cachedConnection.client.db('admin').command({ ping: 1 });
       return cachedConnection;
     } catch (error) {
-      console.warn('Cached MongoDB connection failed ping, reconnecting...', error);
+      console.warn('Cached MongoDB connection failed, creating new connection');
       cachedConnection = null;
     }
   }
@@ -81,15 +76,13 @@ export async function connectToDatabase(): Promise<MongoConnection> {
   const { uri, dbName } = getMongoConfig();
   
   try {
-    console.log('Establishing new MongoDB connection...');
-    
-    // Create new client with production options
+    // Create new client with optimized options
     const client = new MongoClient(uri, MONGODB_OPTIONS);
     
     // Connect with timeout
     await client.connect();
     
-    // Verify connection
+    // Verify connection with a simple ping
     await client.db('admin').command({ ping: 1 });
     
     const db = client.db(dbName);
@@ -100,9 +93,7 @@ export async function connectToDatabase(): Promise<MongoConnection> {
     // Cache the connection
     cachedConnection = connection;
     
-    console.log('MongoDB connected successfully');
-    
-    // Set up connection event listeners
+    // Set up connection event listeners for cleanup
     client.on('error', (error) => {
       console.error('MongoDB connection error:', error);
       cachedConnection = null;
@@ -113,9 +104,6 @@ export async function connectToDatabase(): Promise<MongoConnection> {
       cachedConnection = null;
     });
     
-    // Initialize database indexes on first connection
-    await initializeIndexes(db);
-    
     return connection;
   } catch (error) {
     console.error('Failed to connect to MongoDB:', error);
@@ -123,100 +111,28 @@ export async function connectToDatabase(): Promise<MongoConnection> {
   }
 }
 
-// Initialize database indexes for optimal performance
-async function initializeIndexes(db: Db): Promise<void> {
-  try {
-    console.log('Initializing database indexes...');
-    
-    // Users collection indexes
-    const usersCollection = db.collection('users');
-    await usersCollection.createIndex({ email: 1 }, { unique: true, background: true });
-    await usersCollection.createIndex({ 'subscription.plan': 1, 'subscription.status': 1 }, { background: true });
-    await usersCollection.createIndex({ createdAt: 1 }, { background: true });
-    await usersCollection.createIndex({ lastLogin: 1 }, { background: true });
-    
-    // Content/Websites collection indexes
-    const websitesCollection = db.collection('websites');
-    await websitesCollection.createIndex({ userId: 1, createdAt: -1 }, { background: true });
-    await websitesCollection.createIndex({ userId: 1, status: 1 }, { background: true });
-    await websitesCollection.createIndex({ 'metadata.niche': 1 }, { background: true });
-    
-    // Payments collection indexes
-    const paymentsCollection = db.collection('payments');
-    await paymentsCollection.createIndex({ userId: 1, createdAt: -1 }, { background: true });
-    await paymentsCollection.createIndex({ stripePaymentId: 1 }, { unique: true, background: true });
-    await paymentsCollection.createIndex({ status: 1, createdAt: -1 }, { background: true });
-    
-    // Sessions collection indexes (for session management)
-    const sessionsCollection = db.collection('sessions');
-    await sessionsCollection.createIndex({ userId: 1 }, { background: true });
-    await sessionsCollection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, background: true });
-    
-    // Analytics collection indexes
-    const analyticsCollection = db.collection('analytics');
-    await analyticsCollection.createIndex({ userId: 1, date: -1 }, { background: true });
-    await analyticsCollection.createIndex({ event: 1, createdAt: -1 }, { background: true });
-    
-    // API Usage tracking indexes
-    const apiUsageCollection = db.collection('api_usage');
-    await apiUsageCollection.createIndex({ userId: 1, date: -1 }, { background: true });
-    await apiUsageCollection.createIndex({ service: 1, userId: 1, date: -1 }, { background: true });
-    
-    console.log('Database indexes initialized successfully');
-  } catch (error) {
-    console.error('Error initializing indexes:', error);
-    // Don't throw error here as indexes are not critical for basic functionality
-  }
-}
-
-// Database health check function
+// Simplified database health check
 export async function checkDatabaseHealth(): Promise<{
   status: 'healthy' | 'unhealthy';
-  details: {
-    connected: boolean;
-    responseTime: number;
-    collections: number;
-    indexes: number;
-  };
+  responseTime: number;
 }> {
   try {
     const startTime = Date.now();
-    const { client, db } = await connectToDatabase();
+    const { client } = await connectToDatabase();
     
     // Test basic operations
-    await db.admin().ping();
+    await client.db('admin').command({ ping: 1 });
     const responseTime = Date.now() - startTime;
-    
-    // Get database stats
-    const stats = await db.stats();
-    const collections = await db.listCollections().toArray();
-    
-    // Count total indexes
-    let totalIndexes = 0;
-    for (const collection of collections) {
-      const indexes = await db.collection(collection.name).indexes();
-      totalIndexes += indexes.length;
-    }
     
     return {
       status: 'healthy',
-      details: {
-        connected: true,
-        responseTime,
-        collections: collections.length,
-        indexes: totalIndexes
-      }
+      responseTime
     };
   } catch (error) {
     console.error('Database health check failed:', error);
     return {
       status: 'unhealthy',
-      details: {
-        connected: false,
-        responseTime: -1,
-        collections: 0,
-        indexes: 0
-      }
+      responseTime: -1
     };
   }
 }
@@ -272,82 +188,13 @@ export class DatabaseUtils {
       }
     };
   }
-  
-  // Bulk operations helper
-  static async bulkWrite(collection: any, operations: any[]): Promise<any> {
-    if (operations.length === 0) return null;
-    
-    return collection.bulkWrite(operations, {
-      ordered: false, // Allow partial failures
-      writeConcern: { w: 'majority', j: true }
-    });
-  }
-  
-  // Transaction helper
-  static async withTransaction<T>(
-    operation: (session: any) => Promise<T>
-  ): Promise<T> {
-    const { client } = await connectToDatabase();
-    const session = client.startSession();
-    
-    try {
-      return await session.withTransaction(operation, {
-        readConcern: { level: 'majority' },
-        writeConcern: { w: 'majority', j: true },
-        readPreference: 'primary'
-      });
-    } finally {
-      await session.endSession();
-    }
-  }
 }
 
-// Create a client promise for compatibility with imports
+// Create a client promise for compatibility with existing imports
 const clientPromise = (async () => {
   const { client } = await connectToDatabase();
   return client;
 })();
 
-// Export clientPromise as default for compatibility with imports
+// Export clientPromise as default for compatibility
 export default clientPromise;
-
-// Performance monitoring
-export class MongoPerformanceMonitor {
-  private static slowQueryThreshold = 100; // ms
-  
-  static async logSlowQueries(db: Db): Promise<void> {
-    try {
-      // Enable profiling for slow operations
-      await db.admin().command({
-        profile: 2,
-        slowms: this.slowQueryThreshold
-      });
-      
-      console.log(`MongoDB profiling enabled for queries slower than ${this.slowQueryThreshold}ms`);
-    } catch (error) {
-      console.error('Failed to enable MongoDB profiling:', error);
-    }
-  }
-  
-  static async getPerformanceStats(db: Db): Promise<any> {
-    try {
-      const stats = await db.stats();
-      const serverStatus = await db.admin().command({ serverStatus: 1 });
-      
-      return {
-        collections: stats.collections,
-        dataSize: stats.dataSize,
-        indexSize: stats.indexSize,
-        connections: serverStatus.connections,
-        opcounters: serverStatus.opcounters,
-        memory: serverStatus.mem
-      };
-    } catch (error) {
-      console.error('Failed to get performance stats:', error);
-      return null;
-    }
-  }
-}
-
-
-
