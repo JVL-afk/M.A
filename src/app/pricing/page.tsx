@@ -1,183 +1,216 @@
-// UPDATED PRICING PAGE WITH CORRECT WEBSITE LIMITS
-// Replace your existing pricing page with this corrected version
+'use client' // ✅ CRITICAL FIX: Added client directive for interactivity
 
+import { useRouter } from 'next/navigation' // ✅ CRITICAL FIX: Added router for navigation
+
+// UPDATED PRICING PAGE WITH FUNCTIONAL BUTTONS
+// Replace your existing pricing page with this corrected version
 export default function PricingPage() {
+  const router = useRouter() // ✅ CRITICAL FIX: Initialize router
+
+  // ✅ CRITICAL FIX: Added click handlers for all pricing buttons
+  const handlePlanSelection = (plan: string) => {
+    router.push(`/checkout?plan=${plan}`)
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-orange-600 to-black text-white">
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
       {/* Header */}
-      <header className="bg-black/20 backdrop-blur-sm p-4 border-b border-orange-500/20">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-2xl font-bold">AFFILIFY</h1>
-          <nav className="space-x-6">
-            <a href="/" className="hover:text-orange-200">Home</a>
-            <a href="/features" className="hover:text-orange-200">Features</a>
-            <a href="/pricing" className="text-orange-200">Pricing</a>
-            <a href="/login" className="hover:text-orange-200">Login</a>
-          </nav>
+      <nav className="flex items-center justify-between p-6">
+        <h2 className="text-2xl font-bold text-white">AFFILIFY</h2>
+        <div className="flex space-x-6">
+          <a href="/" className="text-gray-300 hover:text-white transition-colors">Home</a>
+          <a href="/features" className="text-gray-300 hover:text-white transition-colors">Features</a>
+          <a href="/pricing" className="text-gray-300 hover:text-white transition-colors">Pricing</a>
+          <a href="/login" className="text-gray-300 hover:text-white transition-colors">Login</a>
         </div>
-      </header>
+      </nav>
 
       {/* Main Content */}
-      <main className="container mx-auto px-8 py-16">
+      <div className="container mx-auto px-4 py-16">
         <div className="text-center mb-16">
-          <h2 className="text-5xl font-bold mb-4">Choose Your Plan</h2>
-          <p className="text-xl text-orange-200">Start free, scale as you grow</p>
+          <h1 className="text-5xl md:text-6xl font-bold text-white mb-6">
+            Choose Your Plan
+          </h1>
+          <p className="text-xl text-gray-300 max-w-2xl mx-auto">
+            Start free, scale as you grow
+          </p>
         </div>
 
         {/* Pricing Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          
+        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
           {/* Basic Plan */}
-          <div className="bg-black/30 backdrop-blur-sm p-8 rounded-xl border border-purple-500/20 relative">
-            <div className="text-center mb-8">
-              <h3 className="text-2xl font-bold mb-2">Basic</h3>
-              <div className="text-5xl font-bold mb-2">FREE</div>
-              <p className="text-orange-200">Perfect for getting started</p>
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 hover:border-white/40 transition-all duration-300">
+            <h3 className="text-2xl font-bold text-white mb-2">Basic</h3>
+            <div className="text-4xl font-bold text-white mb-4">
+              FREE
             </div>
+            <p className="text-gray-300 mb-6">Perfect for getting started</p>
             
-            <ul className="space-y-4 mb-8">
-              <li className="flex items-center">
+            <ul className="space-y-3 mb-8">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>3 affiliate websites per month</span>
+                3 affiliate websites per month
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Basic templates</span>
+                Basic templates
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Standard support</span>
+                Standard support
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Basic analytics</span>
+                Basic analytics
               </li>
             </ul>
-            
-            <button className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+
+            {/* ✅ CRITICAL FIX: Added onClick handler */}
+            <button 
+              onClick={() => handlePlanSelection('basic')}
+              className="w-full bg-white/20 hover:bg-white/30 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200"
+            >
               Get Started Free
             </button>
           </div>
 
           {/* Pro Plan */}
-          <div className="bg-black/30 backdrop-blur-sm p-8 rounded-xl border border-purple-500/20 relative">
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 hover:border-white/40 transition-all duration-300 relative">
             {/* Most Popular Badge */}
             <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-              <span className="bg-purple-600 text-white px-4 py-1 rounded-full text-sm font-semibold">
+              <span className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full text-sm font-bold">
                 🏆 MOST POPULAR
               </span>
             </div>
-            
-            <div className="text-center mb-8">
-              <h3 className="text-2xl font-bold mb-2">Pro</h3>
-              <div className="text-5xl font-bold mb-2">$29<span className="text-lg">/month</span></div>
-              <p className="text-orange-200">For serious affiliate marketers</p>
+
+            <h3 className="text-2xl font-bold text-white mb-2">Pro</h3>
+            <div className="text-4xl font-bold text-white mb-4">
+              $29<span className="text-lg text-gray-300">/month</span>
             </div>
+            <p className="text-gray-300 mb-6">For serious affiliate marketers</p>
             
-            <ul className="space-y-4 mb-8">
-              <li className="flex items-center">
+            <ul className="space-y-3 mb-8">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>10 affiliate websites per month</span>
+                10 affiliate websites per month
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Premium templates</span>
+                Premium templates
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Priority support</span>
+                Priority support
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Advanced analytics</span>
+                Advanced analytics
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>AI chatbot integration</span>
+                AI chatbot integration
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Custom domains</span>
+                Custom domains
               </li>
             </ul>
-            
-            <button className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+
+            {/* ✅ CRITICAL FIX: Added onClick handler */}
+            <button 
+              onClick={() => handlePlanSelection('pro')}
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200"
+            >
               Start Pro Plan
             </button>
           </div>
 
           {/* Enterprise Plan */}
-          <div className="bg-black/30 backdrop-blur-sm p-8 rounded-xl border border-purple-500/20 relative">
-            <div className="text-center mb-8">
-              <h3 className="text-2xl font-bold mb-2">Enterprise</h3>
-              <div className="text-5xl font-bold mb-2">$99<span className="text-lg">/month</span></div>
-              <p className="text-orange-200">For agencies and teams</p>
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20 hover:border-white/40 transition-all duration-300">
+            <h3 className="text-2xl font-bold text-white mb-2">Enterprise</h3>
+            <div className="text-4xl font-bold text-white mb-4">
+              $99<span className="text-lg text-gray-300">/month</span>
             </div>
+            <p className="text-gray-300 mb-6">For agencies and teams</p>
             
-            <ul className="space-y-4 mb-8">
-              <li className="flex items-center">
+            <ul className="space-y-3 mb-8">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Unlimited affiliate websites</span>
+                Unlimited affiliate websites
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Everything in Pro</span>
+                Everything in Pro
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Team collaboration</span>
+                Team collaboration
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>White-label solutions</span>
+                White-label solutions
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>API access</span>
+                API access
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Dedicated support</span>
+                Dedicated support
               </li>
-              <li className="flex items-center">
+              <li className="flex items-center text-gray-300">
                 <span className="text-green-400 mr-3">✓</span>
-                <span>Custom integrations</span>
+                Custom integrations
               </li>
             </ul>
-            
-            <button className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-6 rounded-lg transition-colors">
+
+            {/* ✅ CRITICAL FIX: Added onClick handler */}
+            <button 
+              onClick={() => handlePlanSelection('enterprise')}
+              className="w-full bg-white/20 hover:bg-white/30 text-white font-bold py-3 px-6 rounded-xl transition-all duration-200"
+            >
               Start Enterprise
             </button>
           </div>
         </div>
 
         {/* FAQ Section */}
-        <div className="mt-20 max-w-4xl mx-auto">
-          <h3 className="text-3xl font-bold text-center mb-12">Frequently Asked Questions</h3>
+        <div className="max-w-4xl mx-auto mt-20">
+          <h2 className="text-3xl font-bold text-white text-center mb-12">
+            Frequently Asked Questions
+          </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-black/20 p-6 rounded-lg">
-              <h4 className="text-xl font-semibold mb-3">What counts as a website?</h4>
-              <p className="text-gray-300">Each unique affiliate website you generate counts toward your monthly limit. You can edit and update existing websites without using additional credits.</p>
+          <div className="grid md:grid-cols-2 gap-8">
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h4 className="text-lg font-semibold text-white mb-3">What counts as a website?</h4>
+              <p className="text-gray-300">
+                Each unique affiliate website you generate counts toward your monthly limit. You can edit and update existing websites without using additional credits.
+              </p>
             </div>
             
-            <div className="bg-black/20 p-6 rounded-lg">
-              <h4 className="text-xl font-semibold mb-3">Can I upgrade anytime?</h4>
-              <p className="text-gray-300">Yes! You can upgrade or downgrade your plan at any time. Changes take effect immediately and you'll be charged prorated amounts.</p>
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h4 className="text-lg font-semibold text-white mb-3">Can I upgrade anytime?</h4>
+              <p className="text-gray-300">
+                Yes! You can upgrade or downgrade your plan at any time. Changes take effect immediately and you'll be charged prorated amounts.
+              </p>
             </div>
             
-            <div className="bg-black/20 p-6 rounded-lg">
-              <h4 className="text-xl font-semibold mb-3">What happens if I exceed my limit?</h4>
-              <p className="text-gray-300">You'll be prompted to upgrade your plan. Your existing websites will continue to work normally, but you won't be able to create new ones until you upgrade.</p>
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h4 className="text-lg font-semibold text-white mb-3">What happens if I exceed my limit?</h4>
+              <p className="text-gray-300">
+                You'll be prompted to upgrade your plan. Your existing websites will continue to work normally, but you won't be able to create new ones until you upgrade.
+              </p>
             </div>
             
-            <div className="bg-black/20 p-6 rounded-lg">
-              <h4 className="text-xl font-semibold mb-3">Is there a free trial?</h4>
-              <p className="text-gray-300">The Basic plan is completely free forever! You can create up to 3 websites per month with no time limit or credit card required.</p>
+            <div className="bg-white/10 backdrop-blur-lg rounded-xl p-6 border border-white/20">
+              <h4 className="text-lg font-semibold text-white mb-3">Is there a free trial?</h4>
+              <p className="text-gray-300">
+                The Basic plan is completely free forever! You can create up to 3 websites per month with no time limit or credit card required.
+              </p>
             </div>
           </div>
         </div>
-      </main>
+      </div>
     </div>
-  );
+  )
 }
