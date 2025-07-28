@@ -3,6 +3,7 @@
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import Navbar from '@/components/Navbar' // ✅ CRITICAL FIX: Added missing Navbar import
 
 function CheckoutForm() {
   const searchParams = useSearchParams()
@@ -100,36 +101,38 @@ function CheckoutForm() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black">
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+      {/* Header */}
       <Navbar />
+
       <div className="container mx-auto px-4 py-16">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="text-center mb-12">
-            <h1 className="text-5xl font-bold text-white mb-6">
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">
               Complete Your Purchase
             </h1>
-            <p className="text-xl text-orange-200">
+            <p className="text-xl text-gray-300">
               You're one step away from supercharging your affiliate marketing!
             </p>
           </div>
 
           <div className="grid md:grid-cols-2 gap-8">
             {/* Plan Details */}
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8">
-              <h2 className="text-2xl font-bold text-white mb-4">
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
+              <h2 className="text-2xl font-bold text-white mb-2">
                 {selectedPlan.name}
               </h2>
-              <div className="text-4xl font-bold text-white mb-2">
+              <div className="text-4xl font-bold text-white mb-4">
                 ${selectedPlan.price}
-                <span className="text-lg text-orange-200">/{selectedPlan.interval}</span>
+                <span className="text-lg text-gray-300">/{selectedPlan.interval}</span>
               </div>
-              <p className="text-orange-200 mb-6">{selectedPlan.description}</p>
-              
+              <p className="text-gray-300 mb-6">{selectedPlan.description}</p>
+
               <h3 className="text-lg font-semibold text-white mb-4">What's included:</h3>
-              <ul className="space-y-2">
+              <ul className="space-y-3">
                 {selectedPlan.features.map((feature, index) => (
-                  <li key={index} className="flex items-center text-orange-100">
+                  <li key={index} className="flex items-center text-gray-300">
                     <svg className="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
@@ -140,68 +143,55 @@ function CheckoutForm() {
             </div>
 
             {/* Checkout Form */}
-            <div className="bg-white/10 backdrop-blur-sm rounded-lg p-8">
+            <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
               <h2 className="text-2xl font-bold text-white mb-6">Payment Details</h2>
-              
+
               {error && (
-                <div className="bg-red-500/20 text-red-200 p-3 rounded-lg mb-6">
-                  {error}
+                <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-6">
+                  <p className="text-red-200">{error}</p>
                 </div>
               )}
 
-              <div className="space-y-6">
-                <div className="bg-blue-500/20 p-4 rounded-lg">
-                  <p className="text-blue-200 text-sm">
-                    🔒 Secure payment powered by Stripe
-                  </p>
+              <div className="space-y-4 mb-6">
+                <div className="flex items-center text-gray-300">
+                  <span className="mr-2">🔒</span>
+                  Secure payment powered by Stripe
                 </div>
-
-                <div className="bg-green-500/20 p-4 rounded-lg">
-                  <p className="text-green-200 text-sm">
-                    ✅ 30-day money-back guarantee
-                  </p>
+                <div className="flex items-center text-gray-300">
+                  <span className="mr-2">✅</span>
+                  30-day money-back guarantee
                 </div>
-
-                <div className="bg-orange-500/20 p-4 rounded-lg">
-                  <p className="text-orange-200 text-sm">
-                    🚀 Instant access after payment
-                  </p>
+                <div className="flex items-center text-gray-300">
+                  <span className="mr-2">🚀</span>
+                  Instant access after payment
                 </div>
+              </div>
 
-                <button
-                  onClick={handleCheckout}
-                  disabled={isLoading}
-                  className="w-full bg-red-600 hover:bg-red-700 text-white py-4 rounded-lg font-semibold text-lg btn-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isLoading ? 'Processing...' : `Subscribe to ${selectedPlan.name}`}
-                </button>
+              <button
+                onClick={handleCheckout}
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold py-4 px-8 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Processing...' : `Subscribe to ${selectedPlan.name}`}
+              </button>
 
+              {/* Trust Indicators */}
+              <div className="grid grid-cols-3 gap-4 mt-8 pt-8 border-t border-white/20">
                 <div className="text-center">
-                  <Link href="/pricing" className="text-orange-300 hover:text-orange-200">
-                    ← Back to pricing
-                  </Link>
+                  <div className="text-2xl mb-2">🔒</div>
+                  <h3 className="font-semibold text-white text-sm">Secure Payment</h3>
+                  <p className="text-gray-400 text-xs">256-bit SSL encryption</p>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Trust Indicators */}
-          <div className="mt-12 text-center">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white/5 p-6 rounded-lg">
-                <div className="text-2xl mb-2">🔒</div>
-                <h3 className="text-white font-semibold mb-2">Secure Payment</h3>
-                <p className="text-orange-200 text-sm">256-bit SSL encryption</p>
-              </div>
-              <div className="bg-white/5 p-6 rounded-lg">
-                <div className="text-2xl mb-2">💰</div>
-                <h3 className="text-white font-semibold mb-2">Money Back Guarantee</h3>
-                <p className="text-orange-200 text-sm">30-day full refund</p>
-              </div>
-              <div className="bg-white/5 p-6 rounded-lg">
-                <div className="text-2xl mb-2">⚡</div>
-                <h3 className="text-white font-semibold mb-2">Instant Access</h3>
-                <p className="text-orange-200 text-sm">Start creating immediately</p>
+                <div className="text-center">
+                  <div className="text-2xl mb-2">💰</div>
+                  <h3 className="font-semibold text-white text-sm">Money Back Guarantee</h3>
+                  <p className="text-gray-400 text-xs">30-day full refund</p>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl mb-2">⚡</div>
+                  <h3 className="font-semibold text-white text-sm">Instant Access</h3>
+                  <p className="text-gray-400 text-xs">Start creating immediately</p>
+                </div>
               </div>
             </div>
           </div>
@@ -218,4 +208,3 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
-
