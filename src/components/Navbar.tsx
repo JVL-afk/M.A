@@ -14,7 +14,7 @@ const Navbar = () => {
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen)
 
   return (
-    <nav className="bg-orange-700 shadow-lg sticky top-0 z-50">
+    <nav className="bg-gray-800 shadow-lg sticky top-0 z-50" style={{ backgroundColor: '#1a202c' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
@@ -29,9 +29,10 @@ const Navbar = () => {
               href="/"
               className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive('/')
-                  ? 'bg-orange-800 text-white'
-                  : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                  ? 'text-white' 
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               }`}
+              style={isActive('/') ? { backgroundColor: '#2d3748' } : {}}
             >
               Home
             </Link>
@@ -39,9 +40,10 @@ const Navbar = () => {
               href="/pricing"
               className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive('/pricing')
-                  ? 'bg-orange-800 text-white'
-                  : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                  ? 'text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               }`}
+              style={isActive('/pricing') ? { backgroundColor: '#2d3748' } : {}}
             >
               Pricing
             </Link>
@@ -49,21 +51,22 @@ const Navbar = () => {
               href="/docs"
               className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive('/docs')
-                  ? 'bg-orange-800 text-white'
-                  : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                  ? 'text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
               }`}
+              style={isActive('/docs') ? { backgroundColor: '#2d3748' } : {}}
             >
               Documentation
             </Link>
             <Link
               href="/login"
-              className="text-orange-100 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors"
+              className="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"
             >
               Login
             </Link>
             <Link
               href="/register"
-              className="bg-white text-orange-700 hover:bg-orange-50 px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm"
+              className="bg-blue-600 text-white hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium transition-colors shadow-sm"
             >
               Get Started
             </Link>
@@ -73,7 +76,7 @@ const Navbar = () => {
           <div className="md:hidden">
             <button
               onClick={toggleMenu}
-              className="text-orange-100 hover:text-white p-2 rounded-md transition-colors"
+              className="text-gray-300 hover:text-white hover:bg-gray-700 p-2 rounded-md transition-colors"
               aria-label="Toggle menu"
             >
               {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -83,15 +86,16 @@ const Navbar = () => {
 
         {/* Mobile Navigation */}
         {isMenuOpen && (
-          <div className="md:hidden border-t border-orange-600">
-            <div className="px-2 pt-2 pb-3 space-y-1 bg-orange-700">
+          <div className="md:hidden border-t border-gray-700">
+            <div className="px-2 pt-2 pb-3 space-y-1" style={{ backgroundColor: '#1a202c' }}>
               <Link
                 href="/"
                 className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                   isActive('/')
-                    ? 'bg-orange-800 text-white'
-                    : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                    ? 'text-white'
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`}
+                style={isActive('/') ? { backgroundColor: '#2d3748' } : {}}
                 onClick={() => setIsMenuOpen(false)}
               >
                 Home
@@ -100,9 +104,10 @@ const Navbar = () => {
                 href="/pricing"
                 className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                   isActive('/pricing')
-                    ? 'bg-orange-800 text-white'
-                    : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                    ? 'text-white'
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`}
+                style={isActive('/pricing') ? { backgroundColor: '#2d3748' } : {}}
                 onClick={() => setIsMenuOpen(false)}
               >
                 Pricing
@@ -111,23 +116,24 @@ const Navbar = () => {
                 href="/docs"
                 className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
                   isActive('/docs')
-                    ? 'bg-orange-800 text-white'
-                    : 'text-orange-100 hover:bg-orange-600 hover:text-white'
+                    ? 'text-white'
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`}
+                style={isActive('/docs') ? { backgroundColor: '#2d3748' } : {}}
                 onClick={() => setIsMenuOpen(false)}
               >
                 Documentation
               </Link>
               <Link
                 href="/login"
-                className="block text-orange-100 hover:text-white px-3 py-2 rounded-md text-base font-medium transition-colors"
+                className="block text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-base font-medium transition-colors"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Login
               </Link>
               <Link
                 href="/register"
-                className="block bg-white text-orange-700 hover:bg-orange-50 px-3 py-2 rounded-md text-base font-medium transition-colors shadow-sm mx-3 mt-2 text-center"
+                className="block bg-blue-600 text-white hover:bg-blue-700 px-3 py-2 rounded-md text-base font-medium transition-colors shadow-sm mx-3 mt-2 text-center"
                 onClick={() => setIsMenuOpen(false)}
               >
                 Get Started
