@@ -1,188 +1,105 @@
+'use client'
+
+import React from 'react'
 import Link from 'next/link'
-import Navbar from '../components/Navbar'
+import { ArrowRight, Zap, TrendingUp, Target } from 'lucide-react'
 
-export default function HomePage() {
+const HeroSection = () => {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-600 via-orange-700 to-black">
-      <Navbar />
-      
-      {/* Hero Section */}
-      <section className="relative overflow-hidden">
-        <div className="container mx-auto px-4 py-20">
-          <div className="text-center max-w-4xl mx-auto">
-            <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 leading-tight">
-              Build High-Converting
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-orange-400">
-                {" "}Affiliate Websites
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto text-center">
+        {/* Main Headline - Flashy and Modern */}
+        <div className="mb-8">
+          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-extrabold mb-6 leading-tight">
+            <span className="bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent animate-pulse">
+              Experience
+            </span>
+            <br />
+            <span className="bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 bg-clip-text text-transparent">
+              Affiliate Marketing
+            </span>
+            <br />
+            <span className="relative">
+              <span className="bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 bg-clip-text text-transparent">
+                Like a Video Game
               </span>
-            </h1>
-            <p className="text-xl md:text-2xl text-orange-200 mb-8 leading-relaxed">
-              Transform any product into a professional affiliate marketing website with AI-powered content generation and optimization.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/signup"
-                className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-8 py-4 rounded-lg font-semibold hover:from-purple-700 hover:to-purple-800 transition-all duration-300 text-lg"
-              >
-                Start Building Now
-              </Link>
-              <Link
-                href="/features"
-                className="bg-transparent border-2 border-orange-400 text-orange-400 px-8 py-4 rounded-lg font-semibold hover:bg-orange-400 hover:text-black transition-all duration-300 text-lg"
-              >
-                See How It Works
-              </Link>
-            </div>
-          </div>
+              <div className="absolute -top-2 -right-2 w-4 h-4 bg-yellow-400 rounded-full animate-ping"></div>
+              <div className="absolute -bottom-2 -left-2 w-3 h-3 bg-purple-500 rounded-full animate-bounce"></div>
+            </span>
+          </h1>
         </div>
-      </section>
 
-      {/* Real Success Story Section */}
-      <section className="py-20 bg-black/20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
-              Real Success Story
-            </h2>
-            <p className="text-xl text-orange-200 max-w-3xl mx-auto">
-              See how AFFILIFY helped create a professional affiliate website that's already generating results
-            </p>
-          </div>
-
-          {/* Featured Website Showcase */}
-          <div className="max-w-6xl mx-auto">
-            <div className="bg-black/30 backdrop-blur-sm rounded-2xl p-8 border border-orange-500/20">
-              <div className="grid md:grid-cols-2 gap-8 items-center">
-                <div>
-                  <div className="bg-gray-800 rounded-lg p-6 mb-6">
-                    <div className="flex items-center mb-4">
-                      <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
-                      <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
-                      <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-                      <div className="text-gray-400 text-sm ml-4">general-1750440900583-bdls9w.affilify.eu</div>
-                    </div>
-                    <div className="bg-gray-900 rounded p-4">
-                      <div className="text-white font-bold text-lg mb-2">FORZA Basketball Hoop</div>
-                      <div className="text-gray-300 text-sm mb-4">Professional affiliate marketing website</div>
-                      <div className="flex items-center space-x-4">
-                        <span className="bg-green-500 text-white px-2 py-1 rounded text-xs">✓ Live</span>
-                        <span className="text-gray-400 text-xs">Published Jun 20</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="text-2xl font-bold text-white mb-4">Built with AFFILIFY</h3>
-                    <p className="text-orange-200 mb-4">
-                      This professional affiliate website was created using AFFILIFY's AI-powered platform. From product analysis to content generation, everything was automated to create a high-converting landing page.
-                    </p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-purple-600/20 rounded-lg p-4">
-                      <div className="text-2xl font-bold text-white">Live</div>
-                      <div className="text-purple-200">Website Status</div>
-                    </div>
-                    <div className="bg-orange-600/20 rounded-lg p-4">
-                      <div className="text-2xl font-bold text-white">Active</div>
-                      <div className="text-orange-200">Deployment</div>
-                    </div>
-                  </div>
-
-                  <Link
-                    href="https://general-1750440900583-bdls9w.affilify.eu"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center bg-gradient-to-r from-purple-600 to-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-orange-700 transition-all duration-300"
-                  >
-                    View Live Website →
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="py-20">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
-              Everything You Need to Succeed
-            </h2>
-            <p className="text-xl text-orange-200 max-w-3xl mx-auto">
-              From AI-powered content generation to professional deployment, AFFILIFY provides all the tools you need
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-            <div className="bg-black/30 backdrop-blur-sm rounded-xl p-8 border border-orange-500/20">
-              <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-purple-700 rounded-lg flex items-center justify-center mb-6">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-white mb-4">AI-Powered Generation</h3>
-              <p className="text-orange-200">
-                Advanced AI analyzes your product and creates compelling, conversion-optimized content automatically.
-              </p>
-            </div>
-
-            <div className="bg-black/30 backdrop-blur-sm rounded-xl p-8 border border-orange-500/20">
-              <div className="w-12 h-12 bg-gradient-to-r from-orange-600 to-orange-700 rounded-lg flex items-center justify-center mb-6">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-white mb-4">Performance Analytics</h3>
-              <p className="text-orange-200">
-                Track your website's performance with detailed analytics and optimization recommendations.
-              </p>
-            </div>
-
-            <div className="bg-black/30 backdrop-blur-sm rounded-xl p-8 border border-orange-500/20">
-              <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-orange-600 rounded-lg flex items-center justify-center mb-6">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0-9v9" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-white mb-4">One-Click Deployment</h3>
-              <p className="text-orange-200">
-                Deploy your affiliate website instantly with our integrated hosting and domain management.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-20 bg-gradient-to-r from-purple-600/20 to-orange-600/20">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
-            Ready to Start Your Affiliate Journey?
-          </h2>
-          <p className="text-xl text-orange-200 mb-8 max-w-2xl mx-auto">
-            Join Andrew and thousands of others who are building successful affiliate businesses with AFFILIFY.
+        {/* Secondary Text - Professional */}
+        <div className="mb-12">
+          <p className="text-xl sm:text-2xl lg:text-3xl text-gray-300 font-light leading-relaxed max-w-4xl mx-auto">
+            Get everything from{' '}
+            <span className="text-blue-400 font-medium">AI insights</span> to{' '}
+            <span className="text-green-400 font-medium">AI-powered website generation</span>, to{' '}
+            <span className="text-purple-400 font-medium">geographic analysis</span>
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link
-              href="/signup"
-              className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-8 py-4 rounded-lg font-semibold hover:from-purple-700 hover:to-purple-800 transition-all duration-300 text-lg"
-            >
-              Get Started Free
-            </Link>
-            <Link
-              href="/about-me"
-              className="bg-transparent border-2 border-orange-400 text-orange-400 px-8 py-4 rounded-lg font-semibold hover:bg-orange-400 hover:text-black transition-all duration-300 text-lg"
-            >
-              Read Andrew's Story
-            </Link>
+        </div>
+
+        {/* Gaming-Style Stats */}
+        <div className="flex flex-wrap justify-center gap-8 mb-12">
+          <div className="bg-gray-800/50 backdrop-blur-sm border border-purple-500/30 rounded-lg p-4 min-w-[120px]">
+            <div className="text-2xl font-bold text-purple-400">Level Up</div>
+            <div className="text-sm text-gray-400">Your Revenue</div>
+          </div>
+          <div className="bg-gray-800/50 backdrop-blur-sm border border-blue-500/30 rounded-lg p-4 min-w-[120px]">
+            <div className="text-2xl font-bold text-blue-400">Power Up</div>
+            <div className="text-sm text-gray-400">With AI</div>
+          </div>
+          <div className="bg-gray-800/50 backdrop-blur-sm border border-green-500/30 rounded-lg p-4 min-w-[120px]">
+            <div className="text-2xl font-bold text-green-400">Unlock</div>
+            <div className="text-sm text-gray-400">New Markets</div>
           </div>
         </div>
-      </section>
+
+        {/* CTA Buttons */}
+        <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
+          <Link
+            href="/register"
+            className="group relative inline-flex items-center justify-center px-8 py-4 text-lg font-bold text-white bg-gradient-to-r from-purple-600 to-blue-600 rounded-full hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 shadow-lg hover:shadow-purple-500/25"
+          >
+            <span className="relative z-10 flex items-center">
+              Start Your Quest
+              <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+            </span>
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-full blur opacity-30 group-hover:opacity-50 transition-opacity"></div>
+          </Link>
+          
+          <Link
+            href="/pricing"
+            className="inline-flex items-center justify-center px-8 py-4 text-lg font-semibold text-gray-300 bg-gray-800/50 border border-gray-600 rounded-full hover:bg-gray-700/50 hover:text-white transform hover:scale-105 transition-all duration-300"
+          >
+            View Power-Ups
+          </Link>
+        </div>
+
+        {/* Feature Icons */}
+        <div className="flex justify-center gap-8 opacity-70">
+          <div className="flex flex-col items-center">
+            <Zap className="h-8 w-8 text-yellow-400 mb-2" />
+            <span className="text-sm text-gray-400">Lightning Fast</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <TrendingUp className="h-8 w-8 text-green-400 mb-2" />
+            <span className="text-sm text-gray-400">High Performance</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <Target className="h-8 w-8 text-red-400 mb-2" />
+            <span className="text-sm text-gray-400">Precision Targeting</span>
+          </div>
+        </div>
+
+        {/* Floating Elements for Gaming Feel */}
+        <div className="absolute top-20 left-10 w-2 h-2 bg-purple-500 rounded-full animate-ping hidden lg:block"></div>
+        <div className="absolute top-40 right-20 w-3 h-3 bg-blue-500 rounded-full animate-bounce hidden lg:block"></div>
+        <div className="absolute bottom-20 left-20 w-2 h-2 bg-green-500 rounded-full animate-pulse hidden lg:block"></div>
+        <div className="absolute bottom-40 right-10 w-4 h-4 bg-yellow-500 rounded-full animate-ping hidden lg:block"></div>
+      </div>
     </div>
   )
 }
+
+export default HeroSection
