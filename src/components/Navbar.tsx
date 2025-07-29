@@ -59,6 +59,17 @@ const Navbar = () => {
               Documentation
             </Link>
             <Link
+              href="/about-me"
+              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                isActive('/about-me')
+                  ? 'text-white'
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+              }`}
+              style={isActive('/about-me') ? { backgroundColor: '#2d3748' } : {}}
+            >
+              About Me
+            </Link>
+            <Link
               href="/login"
               className="text-gray-300 hover:text-white hover:bg-gray-700 px-3 py-2 rounded-md text-sm font-medium transition-colors"
             >
@@ -123,6 +134,18 @@ const Navbar = () => {
                 onClick={() => setIsMenuOpen(false)}
               >
                 Documentation
+              </Link>
+              <Link
+                href="/about-me"
+                className={`block px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                  isActive('/about-me')
+                    ? 'text-white'
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                }`}
+                style={isActive('/about-me') ? { backgroundColor: '#2d3748' } : {}}
+                onClick={() => setIsMenuOpen(false)}
+              >
+                About Me
               </Link>
               <Link
                 href="/login"
