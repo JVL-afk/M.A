@@ -6,22 +6,22 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
 });
 
-// Plan configurations - ENSURE THESE MATCH YOUR STRIPE DASHBOARD
+// Plan configurations - BASIC IS NOW FREE!
 const PLANS = {
   basic: {
-    priceId: 'price_1234567890', // Replace with your actual Stripe price ID
+    priceId: null, // No payment needed for basic
     name: 'Basic Plan',
-    amount: 2900, // $29.00
+    amount: 0, // FREE!
   },
   pro: {
-    priceId: 'price_0987654321', // Replace with your actual Stripe price ID  
+    priceId: 'price_1RdShtEu2csRkzAfNi4ll41S', // Replace with your actual Stripe price ID
     name: 'Pro Plan',
-    amount: 7900, // $79.00
+    amount: 2900, // $29.00
   },
   enterprise: {
-    priceId: 'price_1122334455', // Replace with your actual Stripe price ID
+    priceId: 'price_1RdSjJEu2csRkzAfLNny3pXd', // Replace with your actual Stripe price ID  
     name: 'Enterprise Plan',
-    amount: 19900, // $199.00
+    amount: 9900, // $99.00
   },
 };
 
@@ -63,7 +63,26 @@ export async function POST(request: NextRequest) {
 
     const selectedPlan = PLANS[plan as keyof typeof PLANS];
 
-    // Create Stripe checkout session
+    // Handle free basic plan
+    if (plan === 'basic') {
+      // For basic plan, just update user's plan in database
+      // No payment required!
+      return NextResponse.json({
+        success: true,
+        plan: selectedPlan,
+        message: 'Basic plan activated - no payment required!',
+        redirect: '/dashboard?plan=basic&activated=true'
+      });
+    }
+
+    // For paid plans (Pro and Enterprise), create Stripe checkout
+    if (!selectedPlan.priceId) {
+      return NextResponse.json(
+        { error: 'Price ID not configured for this plan' },
+        { status: 500 }
+      );
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -73,7 +92,7 @@ export async function POST(request: NextRequest) {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}&plan=${plan}`,
       cancel_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/pricing?canceled=true`,
       customer_email: user.email,
       metadata: {
