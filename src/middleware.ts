@@ -1,8 +1,6 @@
-// CORRECTED MIDDLEWARE - AUTHENTICATION FIXED
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Public routes that don't require authentication
 const PUBLIC_ROUTES = [
   '/',
   '/login',
@@ -16,17 +14,18 @@ const PUBLIC_ROUTES = [
   '/checkout'
 ];
 
-// Protected routes that require authentication
 const PROTECTED_ROUTES = [
   '/dashboard',
-  '/my-websites',
-  '/create-website',
-  '/analytics',
-  '/settings',
   '/api/user',
   '/api/websites',
   '/api/ai'
 ];
+
+// ROUTE REDIRECTS - Fix the navigation issue!
+const ROUTE_REDIRECTS = {
+  '/my-websites': '/dashboard/my-websites',
+  '/create-website': '/dashboard/create-website'
+};
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -39,6 +38,11 @@ export function middleware(request: NextRequest) {
     pathname === '/favicon.ico'
   ) {
     return NextResponse.next();
+  }
+
+  // Handle route redirects FIRST
+  if (ROUTE_REDIRECTS[pathname]) {
+    return NextResponse.redirect(new URL(ROUTE_REDIRECTS[pathname], request.url));
   }
 
   // Allow access to public routes
@@ -56,33 +60,27 @@ export function middleware(request: NextRequest) {
   );
 
   if (isProtectedRoute) {
-    // Get authentication token from cookies
     const authToken = request.cookies.get('auth-token')?.value;
     
     if (!authToken) {
-      // No token found, redirect to login
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
     }
 
-    // Basic token validation (just check if it exists and has proper structure)
     try {
       const parts = authToken.split('.');
       if (parts.length !== 3) {
         throw new Error('Invalid token structure');
       }
       
-      // Decode payload to check expiration
       const payload = JSON.parse(atob(parts[1]));
       if (payload.exp && payload.exp < Date.now() / 1000) {
         throw new Error('Token expired');
       }
       
-      // Token appears valid, allow access
       return NextResponse.next();
     } catch (error) {
-      // Invalid token, redirect to login
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
       
@@ -92,7 +90,6 @@ export function middleware(request: NextRequest) {
     }
   }
 
-  // For all other routes, continue normally
   return NextResponse.next();
 }
 
@@ -101,3 +98,4 @@ export const config = {
     '/((?!api/auth|_next/static|_next/image|favicon.ico).*)',
   ],
 };
+
