@@ -1,57 +1,52 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '../../../lib/mongodb';
-import { ObjectId } from 'mongodb';
 
-// Complete Create Website Page with All Features Integrated
-export default async function CreateWebsitePage({ searchParams }: { searchParams?: { error?: string; success?: string } }) {
-  // Get authentication token
-  const cookieStore = cookies();
-  const token = cookieStore.get('auth-token')?.value;
+interface UserInfo {
+  id: string;
+  email: string;
+  plan: string;
+  websiteCount: number;
+}
 
-  let userInfo = null;
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-      const client = await connectToDatabase();
-      const db = client.db('affilify');
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  preview: string;
+  isPremium: boolean;
+  features: string[];
+}
 
-      const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
-      if (user) {
-        const userPlan = user.plan || 'basic';
+export default function CreateWebsitePage() {
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const router = useRouter();
 
-        // Get current website count for limits
-        const websiteCount = await db.collection('generated_websites').countDocuments({
-          userId: user._id
-        });
+  const [formData, setFormData] = useState({
+    productUrl: '',
+    niche: '',
+    targetAudience: '',
+    template: 'simple',
+    customDomain: '',
+    seoKeywords: '',
+    whiteLabel: false
+  });
 
-        userInfo = { user, plan: userPlan, websiteCount };
-      }
-    } catch (error) {
-      redirect('/login');
-    }
-  }
-
-  if (!userInfo) {
-    redirect('/login');
-  }
-
-  // Define plan limits
+  // Plan limits - UPDATED FOR BETTER CONVERSION
   const planLimits = {
-    basic: 5,
-    pro: 25,
-    enterprise: Infinity
+    basic: 3,        // 3 websites - encourages quick upgrade
+    pro: 10,         // 10 websites - good for serious users  
+    enterprise: Infinity  // UNLIMITED - the magic word!
   };
 
-  const userLimit = planLimits[userInfo.plan as keyof typeof planLimits] || 5;
-  const limitReached = userInfo.websiteCount >= userLimit;
-  const errorMessage = searchParams?.error;
-  const successMessage = searchParams?.success;
-
-  // Define available templates based on plan
-  const allTemplates = [
+  // All available templates
+  const allTemplates: Template[] = [
     {
       id: 'simple',
       name: 'Simple Landing Page',
@@ -102,17 +97,96 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
     }
   ];
 
-  // Filter templates based on user plan
+  useEffect(() => {
+    fetchUserInfo();
+  }, []);
+
+  const fetchUserInfo = async () => {
+    try {
+      const response = await fetch('/api/user/plan');
+      if (response.ok) {
+        const data = await response.json();
+        setUserInfo({
+          id: data.user.id,
+          email: data.user.email,
+          plan: data.user.plan,
+          websiteCount: data.planLimits?.websites || 0
+        });
+      } else {
+        router.push('/login');
+      }
+    } catch (error) {
+      console.error('Failed to fetch user info:', error);
+      router.push('/login');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch('/api/ai/generate-website', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSuccess('Website created successfully! Redirecting...');
+        setTimeout(() => {
+          router.push('/dashboard/my-websites');
+        }, 2000);
+      } else {
+        setError(data.error || 'Failed to create website');
+      }
+    } catch (error) {
+      setError('An error occurred while creating the website');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-900 via-orange-800 to-red-900 flex items-center justify-center">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!userInfo) {
+    return null;
+  }
+
+  const userLimit = planLimits[userInfo.plan as keyof typeof planLimits] || 3;
+  const limitReached = userInfo.websiteCount >= userLimit;
   const availableTemplates = userInfo.plan === 'basic'
     ? allTemplates.filter(template => !template.isPremium)
     : allTemplates;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-orange-800 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-orange-900 via-orange-800 to-red-900 text-white">
       <div className="container mx-auto p-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Create New Website</h1>
-          <Link href="/dashboard" className="text-orange-400 hover:text-orange-300">
+          <Link href="/dashboard" className="text-orange-300 hover:text-orange-200">
             ← Back to Dashboard
           </Link>
         </div>
@@ -125,30 +199,35 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                 Plan: {userInfo.plan.charAt(0).toUpperCase() + userInfo.plan.slice(1)}
               </h3>
               <p className="text-gray-300">
-                Websites: {userInfo.websiteCount}/{userLimit === Infinity ? '∞' : userLimit}
+                Websites: {userInfo.websiteCount}/{userLimit === Infinity ? 'UNLIMITED' : userLimit}
               </p>
+              {userInfo.plan === 'basic' && userInfo.websiteCount >= 2 && (
+                <p className="text-orange-400 text-sm mt-1">
+                  ⚠️ Almost at your limit! Upgrade for more websites.
+                </p>
+              )}
             </div>
-            {userInfo.plan === 'basic' && (
+            {userInfo.plan !== 'enterprise' && (
               <Link 
                 href="/pricing" 
                 className="bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded-lg font-semibold transition-colors"
               >
-                Upgrade for More Templates
+                {userInfo.plan === 'basic' ? 'Upgrade for More' : 'Get UNLIMITED'}
               </Link>
             )}
           </div>
         </div>
 
         {/* Error/Success Messages */}
-        {errorMessage && (
+        {error && (
           <div className="bg-red-500/20 border border-red-500/50 rounded-lg p-4 mb-6">
-            <p className="text-red-200">{errorMessage}</p>
+            <p className="text-red-200">{error}</p>
           </div>
         )}
 
-        {successMessage && (
+        {success && (
           <div className="bg-green-500/20 border border-green-500/50 rounded-lg p-4 mb-6">
-            <p className="text-green-200">{successMessage}</p>
+            <p className="text-green-200">{success}</p>
           </div>
         )}
 
@@ -157,14 +236,36 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
           <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-6 mb-8 text-center">
             <h3 className="text-xl font-bold mb-2">Website Limit Reached</h3>
             <p className="text-gray-300 mb-4">
-              You've reached your limit of {userLimit} websites on the {userInfo.plan} plan.
+              You've created all {userLimit} websites allowed on the {userInfo.plan} plan.
+              {userInfo.plan === 'basic' && " That was quick! Ready for more?"}
+              {userInfo.plan === 'pro' && " Want unlimited websites?"}
             </p>
-            <Link 
-              href="/pricing" 
-              className="bg-orange-600 hover:bg-orange-700 px-6 py-3 rounded-lg font-semibold transition-colors"
-            >
-              Upgrade to Create More Websites
-            </Link>
+            <div className="space-x-4">
+              {userInfo.plan === 'basic' && (
+                <>
+                  <Link 
+                    href="/pricing" 
+                    className="bg-orange-600 hover:bg-orange-700 px-6 py-3 rounded-lg font-semibold transition-colors inline-block"
+                  >
+                    Upgrade to Pro (10 websites)
+                  </Link>
+                  <Link 
+                    href="/pricing" 
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 px-6 py-3 rounded-lg font-semibold transition-colors inline-block"
+                  >
+                    Go UNLIMITED! 🚀
+                  </Link>
+                </>
+              )}
+              {userInfo.plan === 'pro' && (
+                <Link 
+                  href="/pricing" 
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 px-6 py-3 rounded-lg font-semibold transition-colors inline-block"
+                >
+                  Upgrade to UNLIMITED Enterprise! 🚀
+                </Link>
+              )}
+            </div>
           </div>
         )}
 
@@ -175,7 +276,7 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
             <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 border border-white/20">
               <h2 className="text-2xl font-bold mb-6">🚀 No BS Website Creation</h2>
               
-              <form action="/api/ai/generate-website" method="POST" className="space-y-6">
+              <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Required: Product URL */}
                 <div>
                   <label className="block text-white font-semibold mb-2">
@@ -184,6 +285,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                   <input
                     type="url"
                     name="productUrl"
+                    value={formData.productUrl}
+                    onChange={handleInputChange}
                     placeholder="https://example.com/affiliate-product"
                     className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     required
@@ -201,6 +304,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                   <input
                     type="text"
                     name="niche"
+                    value={formData.niche}
+                    onChange={handleInputChange}
                     placeholder="e.g., Fitness, Technology, Beauty (AI will detect if empty)"
                     className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                   />
@@ -213,6 +318,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                   </label>
                   <textarea
                     name="targetAudience"
+                    value={formData.targetAudience}
+                    onChange={handleInputChange}
                     placeholder="AI will analyze your product and create perfect audience targeting..."
                     rows={2}
                     className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -231,8 +338,9 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                           type="radio"
                           name="template"
                           value={template.id}
-                          defaultChecked={template.id === 'simple'}
-                          className="sr-only"
+                          checked={formData.template === template.id}
+                          onChange={handleInputChange}
+                          className="sr-only peer"
                         />
                         <div className="border-2 border-white/30 rounded-lg p-4 hover:border-orange-500 transition-colors peer-checked:border-orange-500 peer-checked:bg-orange-500/20">
                           <div className="flex justify-between items-start">
@@ -266,6 +374,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                         <input
                           type="text"
                           name="customDomain"
+                          value={formData.customDomain}
+                          onChange={handleInputChange}
                           placeholder="your-domain.com"
                           className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
@@ -278,6 +388,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                         <input
                           type="text"
                           name="seoKeywords"
+                          value={formData.seoKeywords}
+                          onChange={handleInputChange}
                           placeholder="keyword1, keyword2, keyword3"
                           className="w-full px-4 py-3 rounded-lg bg-white/20 border border-white/30 text-white placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                         />
@@ -289,6 +401,8 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                             <input
                               type="checkbox"
                               name="whiteLabel"
+                              checked={formData.whiteLabel}
+                              onChange={handleInputChange}
                               className="rounded"
                             />
                             <span>White-label (Remove AFFILIFY branding)</span>
@@ -301,9 +415,10 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
 
                 <button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 text-white font-bold py-4 px-6 rounded-lg transition-all duration-200 transform hover:scale-105"
+                  disabled={creating || !formData.productUrl}
+                  className="w-full bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-700 hover:to-red-700 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold py-4 px-6 rounded-lg transition-all duration-200 transform hover:scale-105 disabled:scale-100"
                 >
-                  Create Website with AI 🚀
+                  {creating ? 'Creating Website...' : 'Create Website with AI 🚀'}
                 </button>
               </form>
             </div>
@@ -336,7 +451,7 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                   <div className="bg-orange-500/20 border border-orange-500/50 rounded-lg p-4">
                     <h4 className="font-semibold mb-2">🚀 Unlock More Templates</h4>
                     <p className="text-sm text-gray-300 mb-3">
-                      Upgrade to Pro or Enterprise to access premium templates with advanced features!
+                      Upgrade to Pro (10 websites) or Enterprise (UNLIMITED) to access premium templates!
                     </p>
                     <Link 
                       href="/pricing" 
@@ -369,6 +484,15 @@ export default async function CreateWebsitePage({ searchParams }: { searchParams
                       </>
                     )}
                   </ul>
+                </div>
+
+                {/* Future Feature Teaser */}
+                <div className="bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/50 rounded-lg p-4">
+                  <h4 className="font-semibold mb-2">🔮 Coming Soon</h4>
+                  <p className="text-sm text-gray-300">
+                    Automatic promotion service - we'll market your websites for you! 
+                    The ultimate money-making machine! 🚀
+                  </p>
                 </div>
               </div>
             </div>
