@@ -1,89 +1,138 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { MongoClient } from 'mongodb'
-import jwt from 'jsonwebtoken'
+import { NextRequest, NextResponse } from 'next/server';
+import jwt from 'jsonwebtoken';
+import { MongoClient, ObjectId } from 'mongodb';
 
-const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017'
-const client = new MongoClient(uri)
+function verifyAuth(request: NextRequest) {
+  try {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) return null;
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-fallback-secret-key');
+    return decoded;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
-    // Get JWT token from Authorization header
-    const authHeader = request.headers.get('authorization')
-    const token = authHeader?.replace('Bearer ', '')
-    
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'No authentication token provided' },
-        { status: 401 }
-      )
-    }
-
-    // Verify JWT token
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key')
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid authentication token' },
-        { status: 401 }
-      )
-    }
-
-    const userEmail = decoded.email
-
-    // Connect to MongoDB
-    await client.connect()
-    const db = client.db('affilify')
-    
-    // Get user data
-    const user = await db.collection('users').findOne({ email: userEmail })
+    // Verify authentication
+    const user = verifyAuth(request);
     if (!user) {
       return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
     }
 
-    // Get user's websites
-    const websites = await db.collection('websites').find({ 
-      userId: user._id.toString() 
-    }).toArray()
+    // Connect to database
+    const client = new MongoClient(process.env.MONGODB_URI!);
+    await client.connect();
+    const db = client.db();
 
-    // Calculate statistics
-    const totalWebsites = websites.length
-    const activeSites = websites.filter(site => site.status === 'active').length
+    // Get user's websites
+    const websites = await db.collection('generated_websites')
+      .find({ userId: new ObjectId(user.userId) })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    await client.close();
 
     // Format websites for response
-    const formattedWebsites = websites.map(site => ({
-      id: site._id.toString(),
-      name: site.websiteTitle || site.title || 'Untitled Website',
-      status: site.status || 'active',
-      url: site.url || `https://affilify.eu/generated/${site.generatedId}`,
-      createdAt: site.createdAt,
-      niche: site.niche,
-      template: site.template,
-      affiliateLink: site.affiliateLink
-    }))
+    const formattedWebsites = websites.map(website => ({
+      id: website._id.toString(),
+      productUrl: website.productUrl,
+      niche: website.niche,
+      targetAudience: website.targetAudience,
+      template: website.template,
+      url: website.url,
+      slug: website.slug,
+      status: website.status,
+      views: website.views || 0,
+      clicks: website.clicks || 0,
+      conversions: website.conversions || 0,
+      createdAt: website.createdAt,
+      updatedAt: website.updatedAt
+    }));
 
     return NextResponse.json({
       success: true,
-      data: {
-        userName: user.name || user.email.split('@')[0],
-        userCreatedAt: user.createdAt,
-        userLastActive: new Date().toISOString(),
-        totalWebsites,
-        activeSites,
-        websites: formattedWebsites
-      }
-    })
+      websites: formattedWebsites,
+      count: formattedWebsites.length
+    });
 
-  } catch (error: any) {
-    console.error('Error fetching user websites:', error)
+  } catch (error) {
+    console.error('Fetch websites error:', error);
     return NextResponse.json(
-      { success: false, error: 'Internal server error' },
+      { error: 'Failed to fetch websites' },
       { status: 500 }
-    )
-  } finally {
-    await client.close()
+    );
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    // Verify authentication
+    const user = verifyAuth(request);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const websiteId = searchParams.get('id');
+
+    if (!websiteId) {
+      return NextResponse.json(
+        { error: 'Website ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Connect to database
+    const client = new MongoClient(process.env.MONGODB_URI!);
+    await client.connect();
+    const db = client.db();
+
+    // Delete website (only if it belongs to the user)
+    const result = await db.collection('generated_websites').deleteOne({
+      _id: new ObjectId(websiteId),
+      userId: new ObjectId(user.userId)
+    });
+
+    await client.close();
+
+    if (result.deletedCount === 0) {
+      return NextResponse.json(
+        { error: 'Website not found or access denied' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Website deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete website error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete website' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
+
