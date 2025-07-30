@@ -6,20 +6,20 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
 });
 
-// Plan configurations - BASIC IS NOW FREE!
+// Plan configurations - UPDATE THESE WITH YOUR ACTUAL STRIPE PRICE IDs
 const PLANS = {
   basic: {
-    priceId: null, // No payment needed for basic
+    priceId: null, // Free plan
     name: 'Basic Plan',
-    amount: 0, // FREE!
+    amount: 0,
   },
   pro: {
-    priceId: 'price_1RdShtEu2csRkzAfNi4ll41S', // Replace with your actual Stripe price ID
+    priceId: process.env.STRIPE_PRO_PRICE_ID || 'price_1RdShtEu2csRkzAfNi4ll41S', // Replace with actual ID
     name: 'Pro Plan',
     amount: 2900, // $29.00
   },
   enterprise: {
-    priceId: 'price_1RdSjJEu2csRkzAfLNny3pXd', // Replace with your actual Stripe price ID  
+    priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID || 'price_1RdSjJEu2csRkzAfLNny3pXd', // Replace with actual ID
     name: 'Enterprise Plan',
     amount: 9900, // $99.00
   },
@@ -51,31 +51,27 @@ export async function POST(request: NextRequest) {
     const { plan } = await request.json();
 
     // Validate plan
-    if (!plan || !PLANS[plan as keyof typeof PLANS]) {
+    if (!plan || !PLANS[plan]) {
       return NextResponse.json(
-        { 
-          error: 'Invalid plan selected',
-          availablePlans: Object.keys(PLANS)
-        },
+        { error: 'Invalid plan selected' },
         { status: 400 }
       );
     }
 
-    const selectedPlan = PLANS[plan as keyof typeof PLANS];
+    const selectedPlan = PLANS[plan];
 
-    // Handle free basic plan
+    // Handle free plan
     if (plan === 'basic') {
-      // For basic plan, just update user's plan in database
-      // No payment required!
-      return NextResponse.json({
-        success: true,
-        plan: selectedPlan,
-        message: 'Basic plan activated - no payment required!',
-        redirect: '/dashboard?plan=basic&activated=true'
-      });
+      return NextResponse.json(
+        { 
+          success: true,
+          message: 'Basic plan is free! You already have access.',
+          plan: selectedPlan
+        }
+      );
     }
 
-    // For paid plans (Pro and Enterprise), create Stripe checkout
+    // Validate Stripe price ID
     if (!selectedPlan.priceId) {
       return NextResponse.json(
         { error: 'Price ID not configured for this plan' },
@@ -83,6 +79,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -106,6 +103,10 @@ export async function POST(request: NextRequest) {
         },
       },
       allow_promotion_codes: true,
+      billing_address_collection: 'auto',
+      automatic_tax: {
+        enabled: true,
+      },
     } );
 
     return NextResponse.json({
@@ -137,3 +138,4 @@ export async function OPTIONS() {
     },
   });
 }
+
