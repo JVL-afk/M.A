@@ -1,57 +1,136 @@
 import { NextRequest, NextResponse } from 'next/server';
-// @ts-ignore
-import clientPromise from '../../../../../lib/mongodb';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { MongoClient } from 'mongodb'; // Import MongoClient for typing
+import OpenAI from 'openai';
+import jwt from 'jsonwebtoken';
+
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// Verify authentication
+function verifyAuth(request: NextRequest) {
+  try {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) return null;
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-fallback-secret-key');
+    return decoded;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
-// @ts-ignore
-    const client: MongoClient = await clientPromise;
-
-    const { websiteUrl } = await request.json();
-    const userEmail = request.headers.get('x-user-email') || 'demo@user.com';
-
-    if (!websiteUrl) {
-      return NextResponse.json({
-        success: false,
-        error: 'Website URL is required for analysis',
-      }, { status: 400 });
+    // Verify authentication
+    const user = verifyAuth(request);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
     }
 
-    console.log(`AI Website Analysis Request for ${userEmail} | URL: ${websiteUrl}`);
+    const { url } = await request.json();
 
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    if (!url) {
+      return NextResponse.json(
+        { error: 'Website URL is required' },
+        { status: 400 }
+      );
+    }
 
-    // Construct a detailed prompt for website analysis
-    const prompt = `Analyze the following website URL: ${websiteUrl}. Provide a comprehensive analysis focusing on:\n    1. Overall summary and main topic.\n    2. SEO recommendations (meta descriptions, alt tags, internal/external links, keywords).\n    3. Content quality, readability, and relevance to potential affiliate niches.\n    4. Identify opportunities for new content, keyword targeting, and affiliate product integration.\n    5. Suggestions for affiliate programs in complementary niches.\n\n    Provide the analysis in a structured JSON format with the following keys:\n    {\n      "summary": "Overall summary of the website and its main topic.",\n      "seoRecommendations": [\n        "Recommendation 1",\n        "Recommendation 2"\n      ],\n      "contentOpportunities": [\n        "Opportunity 1",\n        "Opportunity 2"\n      ],\n      "affiliateSuggestions": [\n        "Suggestion 1",\n        "Suggestion 2"\n      ]\n    }\n\n    Ensure the analysis is insightful, actionable, and professionally written.`;
-
-    const result = await model.generateContent(prompt);
-    const aiResponse = await result.response;
-    const generatedAnalysis = aiResponse.text();
-
-    // Attempt to parse the generated analysis as JSON
-    let analysisResult;
+    // Validate URL
     try {
-      analysisResult = JSON.parse(generatedAnalysis);
-    } catch (parseError) {
-      console.error('Failed to parse AI generated analysis as JSON:', parseError);
-      // Fallback to plain text if JSON parsing fails
-      analysisResult = { rawText: generatedAnalysis };
+      new URL(url);
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid URL format' },
+        { status: 400 }
+      );
     }
+
+    // Fetch website content
+    let websiteContent = '';
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 10000
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      websiteContent = await response.text();
+      
+      // Clean HTML content
+      websiteContent = websiteContent
+        .replace(/<script[^>]*>.*?<\/script>/gis, '')
+        .replace(/<style[^>]*>.*?<\/style>/gis, '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .substring(0, 3000);
+        
+    } catch (fetchError) {
+      return NextResponse.json(
+        { 
+          error: 'Failed to fetch website content',
+          details: fetchError.message
+        },
+        { status: 400 }
+      );
+    }
+
+    // Analyze with OpenAI - EXACT same prompt as local testing
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert website performance analyzer. Analyze the provided website content and provide detailed insights on SEO, performance, user experience, conversion optimization, and technical improvements. Be specific and actionable."
+        },
+        {
+          role: "user",
+          content: `Please analyze this website and provide comprehensive insights:\n\nURL: ${url}\n\nContent: ${websiteContent}\n\nProvide analysis on:\n1. SEO optimization\n2. Performance issues\n3. User experience\n4. Conversion optimization\n5. Technical recommendations`
+        }
+      ],
+      max_tokens: 1500,
+      temperature: 0.7,
+    });
+
+    const analysis = completion.choices[0]?.message?.content || 'Analysis not available';
 
     return NextResponse.json({
       success: true,
-      message: 'Website analyzed successfully!',
-      analysis: analysisResult,
+      url,
+      analysis,
+      timestamp: new Date().toISOString(),
+      contentLength: websiteContent.length
     });
+
   } catch (error) {
-    console.error('AI website analysis error:', error);
-    return NextResponse.json({
-      success: false,
-      error: 'Internal server error during AI analysis',
-    }, { status: 500 });
+    console.error('AI Analysis error:', error);
+    return NextResponse.json(
+      { 
+        error: 'Analysis failed',
+        details: error.message
+      },
+      { status: 500 }
+    );
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
 }
