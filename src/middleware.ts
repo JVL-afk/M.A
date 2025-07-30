@@ -33,7 +33,7 @@ export function middleware(request: NextRequest) {
   // Skip middleware for static files and Next.js internals
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/auth') ||  // 🔥 CRITICAL FIX: Exclude auth API routes!
     pathname.includes('.') ||
     pathname === '/favicon.ico'
   ) {
@@ -61,7 +61,7 @@ export function middleware(request: NextRequest) {
 
   if (isProtectedRoute) {
     const authToken = request.cookies.get('auth-token')?.value;
-    
+
     if (!authToken) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('redirect', pathname);
@@ -73,12 +73,12 @@ export function middleware(request: NextRequest) {
       if (parts.length !== 3) {
         throw new Error('Invalid token structure');
       }
-      
+
       const payload = JSON.parse(atob(parts[1]));
       if (payload.exp && payload.exp < Date.now() / 1000) {
         throw new Error('Token expired');
       }
-      
+
       return NextResponse.next();
     } catch (error) {
       const loginUrl = new URL('/login', request.url);
@@ -98,4 +98,3 @@ export const config = {
     '/((?!api/auth|_next/static|_next/image|favicon.ico).*)',
   ],
 };
-
