@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '@/lib/mongodb';
-import User from '@/lib/models/User';
+import { connectToDatabase } from '../../../lib/mongodb'; // Fixed path
 
 function verifyAuth(request: NextRequest) {
   try {
@@ -17,7 +16,6 @@ function verifyAuth(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
     const user = verifyAuth(request);
     if (!user) {
       return NextResponse.json(
@@ -27,10 +25,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Connect to database
-    await connectToDatabase();
+    const { db } = await connectToDatabase();
 
-    // Get user's current plan
-    const dbUser = await User.findById(user.userId);
+    // Get user directly from MongoDB
+    const dbUser = await db.collection('users').findOne({ 
+      _id: new (require('mongodb')).ObjectId(user.userId) 
+    });
+
     if (!dbUser) {
       return NextResponse.json(
         { error: 'User not found' },
@@ -40,18 +41,19 @@ export async function GET(request: NextRequest) {
 
     const currentPlan = dbUser.plan || 'basic';
 
-    // Define plan features - BASIC IS NOW FREE!
+    // Plan features - BASIC IS FREE!
     const planFeatures = {
       basic: {
         price: 'FREE',
         websites: 3,
         templates: 'basic',
-        analytics: true, // Now included in free plan!
+        analytics: true,
         aiAnalysis: true,
         pageSpeedAnalysis: true,
         apiAccess: false,
         support: 'community',
         customDomains: false,
+        discordAccess: false, // Only paid plans get Discord
         features: [
           '3 affiliate websites',
           'AI-powered content generation',
@@ -71,15 +73,16 @@ export async function GET(request: NextRequest) {
         apiAccess: false,
         support: 'priority',
         customDomains: true,
+        discordAccess: true, // Discord access for paid users!
         features: [
           '10 affiliate websites',
           'Premium templates',
           'Advanced analytics',
           'Custom domains',
           'Priority support',
-          'Advanced SEO tools',
-          'A/B testing',
-          'Conversion tracking'
+          'Discord community access',
+          'Revenue competitions',
+          'Advanced SEO tools'
         ]
       },
       enterprise: {
@@ -92,15 +95,16 @@ export async function GET(request: NextRequest) {
         apiAccess: true,
         support: 'dedicated',
         customDomains: true,
+        discordAccess: true,
         features: [
           'Unlimited websites',
           'All premium templates',
           'Full analytics suite',
           'API access',
           'Dedicated support',
-          'White-label options',
-          'Advanced integrations',
-          'Custom development'
+          'VIP Discord access',
+          'Clan leadership privileges',
+          'White-label options'
         ]
       }
     };
@@ -117,20 +121,15 @@ export async function GET(request: NextRequest) {
       },
       features: planFeatures[currentPlan] || planFeatures.basic,
       hasAccess: {
-        aiAnalysis: true, // All plans get AI analysis
-        websiteGeneration: true, // All plans get website generation
-        pageSpeedAnalysis: true, // All plans get page speed analysis
-        analytics: true, // Now all plans get analytics!
+        aiAnalysis: true,
+        websiteGeneration: true,
+        pageSpeedAnalysis: true,
+        analytics: true,
         apiAccess: currentPlan === 'enterprise',
         customDomains: currentPlan !== 'basic',
         prioritySupport: currentPlan !== 'basic',
+        discordAccess: currentPlan !== 'basic', // Key feature!
         unlimitedWebsites: currentPlan === 'enterprise'
-      },
-      planLimits: {
-        websites: currentPlan === 'enterprise' ? 999999 : 
-                 currentPlan === 'pro' ? 25 : 5,
-        monthlyAnalytics: currentPlan === 'enterprise' ? 999999 :
-                         currentPlan === 'pro' ? 10000 : 1000
       }
     });
 
@@ -142,4 +141,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
