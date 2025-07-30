@@ -1,14 +1,14 @@
+// CORRECTED LOGIN API - src/app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '@/lib/mongodb';
-import User from '@/lib/models/User';
+import { connectToDatabase } from '../../../lib/mongodb'; // Fixed path
+// Remove the User model import for now - we'll use direct MongoDB queries
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();
 
-    // Validate input
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email and password are required' },
@@ -17,12 +17,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Connect to database
-    await connectToDatabase();
+    const { db } = await connectToDatabase();
 
-    // Find user (case insensitive)
-    const user = await User.findOne({ 
+    // Find user directly with MongoDB
+    const user = await db.collection('users').findOne({ 
       email: email.toLowerCase().trim() 
-    }).select('+password');
+    });
 
     if (!user) {
       return NextResponse.json(
@@ -53,11 +53,14 @@ export async function POST(request: NextRequest) {
     );
 
     // Update last login
-    await User.findByIdAndUpdate(user._id, {
-      lastLoginAt: new Date()
-    });
+    await db.collection('users').updateOne(
+      { _id: user._id },
+      { 
+        $set: { lastLoginAt: new Date() },
+        $inc: { loginCount: 1 }
+      }
+    );
 
-    // Create response
     const response = NextResponse.json({
       success: true,
       user: {
@@ -68,12 +71,11 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Set secure cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
       path: '/'
     } );
 
@@ -98,4 +100,3 @@ export async function OPTIONS() {
     },
   });
 }
-
