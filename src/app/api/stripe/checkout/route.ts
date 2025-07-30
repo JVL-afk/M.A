@@ -1,82 +1,42 @@
-import { NextRequest, NextResponse } from 'next/server';
-import Stripe from 'stripe';
-import jwt from 'jsonwebtoken';
+// app/api/stripe/checkout/route.ts
+import { NextRequest, NextResponse } from 'next/server'
+import Stripe from 'stripe'
 
+// Initialize Stripe with your secret key from environment variables
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2023-10-16',
-});
-
-// Plan configurations - UPDATE THESE WITH YOUR ACTUAL STRIPE PRICE IDs
-const PLANS = {
-  basic: {
-    priceId: null, // Free plan
-    name: 'Basic Plan',
-    amount: 0,
-  },
-  pro: {
-    priceId: process.env.STRIPE_PRO_PRICE_ID || 'price_1RdShtEu2csRkzAfNi4ll41S', // Replace with actual ID
-    name: 'Pro Plan',
-    amount: 2900, // $29.00
-  },
-  enterprise: {
-    priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID || 'price_1RdSjJEu2csRkzAfLNny3pXd', // Replace with actual ID
-    name: 'Enterprise Plan',
-    amount: 9900, // $99.00
-  },
-};
-
-function verifyAuth(request: NextRequest) {
-  try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) return null;
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-fallback-secret-key');
-    return decoded;
-  } catch {
-    return null;
-  }
-}
+})
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify authentication
-    const user = verifyAuth(request);
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
+    const { planId, planName, billingCycle } = await request.json()
 
-    const { plan } = await request.json();
-
-    // Validate plan
-    if (!plan || !PLANS[plan]) {
+    // Validate required fields
+    if (!planId || !planName || !billingCycle) {
       return NextResponse.json(
-        { error: 'Invalid plan selected' },
+        { error: 'Missing required fields: planId, planName, billingCycle' },
         { status: 400 }
-      );
+      )
     }
 
-    const selectedPlan = PLANS[plan];
-
-    // Handle free plan
-    if (plan === 'basic') {
-      return NextResponse.json(
-        { 
-          success: true,
-          message: 'Basic plan is free! You already have access.',
-          plan: selectedPlan
-        }
-      );
+    // Define your price IDs based on plan and billing cycle
+    const priceMap: { [key: string]: string } = {
+      'basic-monthly': process.env.STRIPE_BASIC_MONTHLY_PRICE_ID || '',
+      'basic-yearly': process.env.STRIPE_BASIC_YEARLY_PRICE_ID || '',
+      'pro-monthly': process.env.STRIPE_PRO_MONTHLY_PRICE_ID || '',
+      'pro-yearly': process.env.STRIPE_PRO_YEARLY_PRICE_ID || '',
+      'enterprise-monthly': process.env.STRIPE_ENTERPRISE_MONTHLY_PRICE_ID || '',
+      'enterprise-yearly': process.env.STRIPE_ENTERPRISE_YEARLY_PRICE_ID || '',
     }
 
-    // Validate Stripe price ID
-    if (!selectedPlan.priceId) {
+    const priceKey = `${planName.toLowerCase()}-${billingCycle}`
+    const priceId = priceMap[priceKey]
+
+    if (!priceId) {
       return NextResponse.json(
-        { error: 'Price ID not configured for this plan' },
-        { status: 500 }
-      );
+        { error: `Invalid plan configuration: ${priceKey}` },
+        { status: 400 }
+      )
     }
 
     // Create Stripe checkout session
@@ -84,58 +44,81 @@ export async function POST(request: NextRequest) {
       payment_method_types: ['card'],
       line_items: [
         {
-          price: selectedPlan.priceId,
+          price: priceId,
           quantity: 1,
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}&plan=${plan}`,
-      cancel_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/pricing?canceled=true`,
-      customer_email: user.email,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
       metadata: {
-        userId: user.userId,
-        plan: plan,
+        planId,
+        planName,
+        billingCycle,
       },
       subscription_data: {
         metadata: {
-          userId: user.userId,
-          plan: plan,
+          planId,
+          planName,
+          billingCycle,
         },
       },
-      allow_promotion_codes: true,
-      billing_address_collection: 'auto',
-      automatic_tax: {
-        enabled: true,
-      },
-    } );
+      allow_promotion_codes: true, // Enable coupon codes
+    })
 
-    return NextResponse.json({
-      success: true,
+    return NextResponse.json({ 
       sessionId: session.id,
-      url: session.url,
-      plan: selectedPlan
-    });
+      url: session.url 
+    })
 
   } catch (error) {
-    console.error('Stripe checkout error:', error);
+    console.error('Stripe checkout error:', error)
+    
+    if (error instanceof Stripe.errors.StripeError) {
+      return NextResponse.json(
+        { error: `Stripe error: ${error.message}` },
+        { status: 400 }
+      )
+    }
+
     return NextResponse.json(
-      { 
-        error: 'Checkout session creation failed',
-        details: error.message
-      },
+      { error: 'Failed to create checkout session' },
       { status: 500 }
-    );
+    )
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
+// GET method for retrieving session details
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const sessionId = searchParams.get('session_id')
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: 'Session ID is required' },
+        { status: 400 }
+      )
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+
+    return NextResponse.json({
+      session: {
+        id: session.id,
+        payment_status: session.payment_status,
+        customer_email: session.customer_details?.email,
+        subscription_id: session.subscription,
+      }
+    })
+
+  } catch (error) {
+    console.error('Error retrieving checkout session:', error)
+    return NextResponse.json(
+      { error: 'Failed to retrieve session' },
+      { status: 500 }
+    )
+  }
 }
+
 
