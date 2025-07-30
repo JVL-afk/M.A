@@ -1,149 +1,120 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { connectToDatabase } from '../../../../lib/mongodb'
-import jwt from 'jsonwebtoken'
-import { ObjectId } from 'mongodb'
-import Stripe from 'stripe'
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+import jwt from 'jsonwebtoken';
 
-// Initialize Stripe without specifying API version to avoid compatibility issues
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!)
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2023-10-16',
+});
 
-export async function POST(request: NextRequest) {
+// Plan configurations - ENSURE THESE MATCH YOUR STRIPE DASHBOARD
+const PLANS = {
+  basic: {
+    priceId: 'price_1234567890', // Replace with your actual Stripe price ID
+    name: 'Basic Plan',
+    amount: 2900, // $29.00
+  },
+  pro: {
+    priceId: 'price_0987654321', // Replace with your actual Stripe price ID  
+    name: 'Pro Plan',
+    amount: 7900, // $79.00
+  },
+  enterprise: {
+    priceId: 'price_1122334455', // Replace with your actual Stripe price ID
+    name: 'Enterprise Plan',
+    amount: 19900, // $199.00
+  },
+};
+
+function verifyAuth(request: NextRequest) {
   try {
-    const { plan } = await request.json()
-
-    // Validate plan
-    const validPlans = ['basic', 'pro', 'enterprise']
-    if (!plan || !validPlans.includes(plan)) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid plan selected' },
-        { status: 400 }
-      )
-    }
-
-    // Get token from cookie
-    const token = request.cookies.get('auth-token')?.value
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Authentication required. Please log in.' },
-        { status: 401 }
-      )
-    }
-
-    let decoded: any
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as any
-    } catch (jwtError) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid authentication. Please log in again.' },
-        { status: 401 }
-      )
-    }
-
-    // Connect to database
-    const client = await connectToDatabase()
-    const db = client.db('affilify')
-
-    // Get user details
-    const user = await db.collection('users').findOne({ 
-      _id: new ObjectId(decoded.userId) 
-    })
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) return null;
     
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      )
-    }
-
-    // Define plan pricing
-    const planPricing = {
-      basic: { price: 0, priceId: null },
-      pro: { price: 2900, priceId: process.env.STRIPE_PRO_PRICE_ID || 'price_pro' },
-      enterprise: { price: 9900, priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID || 'price_enterprise' }
-    }
-
-    const selectedPlan = planPricing[plan as keyof typeof planPricing]
-
-    // Handle free plan
-    if (plan === 'basic') {
-      // Update user plan directly for free plan
-      await db.collection('users').updateOne(
-        { _id: new ObjectId(decoded.userId) },
-        { $set: { plan: 'basic', updatedAt: new Date() } }
-      )
-
-      return NextResponse.json({
-        success: true,
-        message: 'Successfully upgraded to Basic plan!',
-        plan: 'basic'
-      })
-    }
-
-    // Create Stripe checkout session for paid plans
-    try {
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [
-          {
-            price_data: {
-              currency: 'usd',
-              product_data: {
-                name: `AFFILIFY ${plan.charAt(0).toUpperCase() + plan.slice(1)} Plan`,
-                description: `Monthly subscription to AFFILIFY ${plan} plan`
-              },
-              unit_amount: selectedPlan.price,
-              recurring: {
-                interval: 'month'
-              }
-            },
-            quantity: 1
-          }
-        ],
-        mode: 'subscription',
-        success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/dashboard?payment=success&plan=${plan}`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/pricing?payment=cancelled`,
-        customer_email: user.email,
-        metadata: {
-          userId: decoded.userId,
-          plan: plan
-        }
-      })
-
-      return NextResponse.json({
-        success: true,
-        sessionId: session.id,
-        url: session.url
-      })
-
-    } catch (stripeError) {
-      console.error('Stripe error:', stripeError)
-      
-      const errorMessage = stripeError instanceof Error ? stripeError.message : 'Unknown Stripe error'
-      
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Payment processing failed. Please try again.',
-          details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-        },
-        { status: 500 }
-      )
-    }
-
-  } catch (error) {
-    console.error('Checkout error:', error)
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-    
-    return NextResponse.json(
-      { 
-        success: false, 
-        error: 'Checkout failed. Please try again.',
-        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-      },
-      { status: 500 }
-    )
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-fallback-secret-key');
+    return decoded;
+  } catch {
+    return null;
   }
 }
 
+export async function POST(request: NextRequest) {
+  try {
+    // Verify authentication
+    const user = verifyAuth(request);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
+    const { plan } = await request.json();
+
+    // Validate plan
+    if (!plan || !PLANS[plan as keyof typeof PLANS]) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid plan selected',
+          availablePlans: Object.keys(PLANS)
+        },
+        { status: 400 }
+      );
+    }
+
+    const selectedPlan = PLANS[plan as keyof typeof PLANS];
+
+    // Create Stripe checkout session
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price: selectedPlan.priceId,
+          quantity: 1,
+        },
+      ],
+      mode: 'subscription',
+      success_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXTAUTH_URL || 'https://affilify.eu'}/pricing?canceled=true`,
+      customer_email: user.email,
+      metadata: {
+        userId: user.userId,
+        plan: plan,
+      },
+      subscription_data: {
+        metadata: {
+          userId: user.userId,
+          plan: plan,
+        },
+      },
+      allow_promotion_codes: true,
+    } );
+
+    return NextResponse.json({
+      success: true,
+      sessionId: session.id,
+      url: session.url,
+      plan: selectedPlan
+    });
+
+  } catch (error) {
+    console.error('Stripe checkout error:', error);
+    return NextResponse.json(
+      { 
+        error: 'Checkout session creation failed',
+        details: error.message
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
