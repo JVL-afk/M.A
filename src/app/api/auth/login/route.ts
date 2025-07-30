@@ -1,9 +1,8 @@
-// CORRECTED LOGIN API - src/app/api/auth/login/route.ts
+// ULTRA-SIMPLE LOGIN API - src/app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '../../../lib/mongodb'; // Fixed path
-// Remove the User model import for now - we'll use direct MongoDB queries
+import { MongoClient } from 'mongodb';
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,15 +15,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Connect to database
-    const { db } = await connectToDatabase();
+    // Direct MongoDB connection
+    const client = new MongoClient(process.env.MONGODB_URI!);
+    await client.connect();
+    const db = client.db();
 
-    // Find user directly with MongoDB
+    // Find user
     const user = await db.collection('users').findOne({ 
       email: email.toLowerCase().trim() 
     });
 
     if (!user) {
+      await client.close();
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
@@ -34,6 +36,7 @@ export async function POST(request: NextRequest) {
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
+      await client.close();
       return NextResponse.json(
         { error: 'Invalid credentials' },
         { status: 401 }
@@ -60,6 +63,8 @@ export async function POST(request: NextRequest) {
         $inc: { loginCount: 1 }
       }
     );
+
+    await client.close();
 
     const response = NextResponse.json({
       success: true,
@@ -100,3 +105,4 @@ export async function OPTIONS() {
     },
   });
 }
+
