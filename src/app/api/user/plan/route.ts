@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '../../../lib/mongodb'; // Fixed path
+import { MongoClient, ObjectId } from 'mongodb';
 
 function verifyAuth(request: NextRequest) {
   try {
@@ -24,13 +24,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Connect to database
-    const { db } = await connectToDatabase();
+    // Direct MongoDB connection
+    const client = new MongoClient(process.env.MONGODB_URI!);
+    await client.connect();
+    const db = client.db();
 
-    // Get user directly from MongoDB
+    // Get user
     const dbUser = await db.collection('users').findOne({ 
-      _id: new (require('mongodb')).ObjectId(user.userId) 
+      _id: new ObjectId(user.userId) 
     });
+
+    await client.close();
 
     if (!dbUser) {
       return NextResponse.json(
@@ -41,70 +45,42 @@ export async function GET(request: NextRequest) {
 
     const currentPlan = dbUser.plan || 'basic';
 
-    // Plan features - BASIC IS FREE!
+    // Plan features
     const planFeatures = {
       basic: {
         price: 'FREE',
         websites: 3,
-        templates: 'basic',
         analytics: true,
-        aiAnalysis: true,
-        pageSpeedAnalysis: true,
-        apiAccess: false,
-        support: 'community',
-        customDomains: false,
-        discordAccess: false, // Only paid plans get Discord
+        discordAccess: false,
         features: [
           '3 affiliate websites',
           'AI-powered content generation',
           'Page speed analysis',
-          'Basic analytics',
-          'Community support',
-          'AFFILIFY subdomain hosting'
+          'Basic analytics'
         ]
       },
       pro: {
         price: '$29/month',
         websites: 10,
-        templates: 'premium',
         analytics: true,
-        aiAnalysis: true,
-        pageSpeedAnalysis: true,
-        apiAccess: false,
-        support: 'priority',
-        customDomains: true,
-        discordAccess: true, // Discord access for paid users!
+        discordAccess: true,
         features: [
           '10 affiliate websites',
           'Premium templates',
-          'Advanced analytics',
-          'Custom domains',
-          'Priority support',
           'Discord community access',
-          'Revenue competitions',
-          'Advanced SEO tools'
+          'Revenue competitions'
         ]
       },
       enterprise: {
         price: '$99/month',
         websites: 'unlimited',
-        templates: 'all',
         analytics: true,
-        aiAnalysis: true,
-        pageSpeedAnalysis: true,
-        apiAccess: true,
-        support: 'dedicated',
-        customDomains: true,
         discordAccess: true,
         features: [
           'Unlimited websites',
-          'All premium templates',
-          'Full analytics suite',
           'API access',
-          'Dedicated support',
           'VIP Discord access',
-          'Clan leadership privileges',
-          'White-label options'
+          'Clan leadership'
         ]
       }
     };
@@ -114,22 +90,14 @@ export async function GET(request: NextRequest) {
       user: {
         id: dbUser._id.toString(),
         email: dbUser.email,
-        plan: currentPlan,
-        isVerified: dbUser.isVerified || false,
-        createdAt: dbUser.createdAt,
-        lastLoginAt: dbUser.lastLoginAt
+        plan: currentPlan
       },
       features: planFeatures[currentPlan] || planFeatures.basic,
       hasAccess: {
         aiAnalysis: true,
         websiteGeneration: true,
-        pageSpeedAnalysis: true,
         analytics: true,
-        apiAccess: currentPlan === 'enterprise',
-        customDomains: currentPlan !== 'basic',
-        prioritySupport: currentPlan !== 'basic',
-        discordAccess: currentPlan !== 'basic', // Key feature!
-        unlimitedWebsites: currentPlan === 'enterprise'
+        discordAccess: currentPlan !== 'basic'
       }
     });
 
@@ -141,3 +109,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
