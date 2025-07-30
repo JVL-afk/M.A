@@ -40,31 +40,68 @@ export async function GET(request: NextRequest) {
 
     const currentPlan = dbUser.plan || 'basic';
 
-    // Define plan features
+    // Define plan features - BASIC IS NOW FREE!
     const planFeatures = {
       basic: {
-        websites: 5,
+        price: 'FREE',
+        websites: 3,
         templates: 'basic',
-        analytics: false,
+        analytics: true, // Now included in free plan!
+        aiAnalysis: true,
+        pageSpeedAnalysis: true,
         apiAccess: false,
-        support: 'email',
-        customDomains: false
+        support: 'community',
+        customDomains: false,
+        features: [
+          '3 affiliate websites',
+          'AI-powered content generation',
+          'Page speed analysis',
+          'Basic analytics',
+          'Community support',
+          'AFFILIFY subdomain hosting'
+        ]
       },
       pro: {
-        websites: 25,
+        price: '$29/month',
+        websites: 10,
         templates: 'premium',
         analytics: true,
+        aiAnalysis: true,
+        pageSpeedAnalysis: true,
         apiAccess: false,
         support: 'priority',
-        customDomains: true
+        customDomains: true,
+        features: [
+          '10 affiliate websites',
+          'Premium templates',
+          'Advanced analytics',
+          'Custom domains',
+          'Priority support',
+          'Advanced SEO tools',
+          'A/B testing',
+          'Conversion tracking'
+        ]
       },
       enterprise: {
+        price: '$99/month',
         websites: 'unlimited',
         templates: 'all',
         analytics: true,
+        aiAnalysis: true,
+        pageSpeedAnalysis: true,
         apiAccess: true,
         support: 'dedicated',
-        customDomains: true
+        customDomains: true,
+        features: [
+          'Unlimited websites',
+          'All premium templates',
+          'Full analytics suite',
+          'API access',
+          'Dedicated support',
+          'White-label options',
+          'Advanced integrations',
+          'Custom development'
+        ]
       }
     };
 
@@ -82,10 +119,18 @@ export async function GET(request: NextRequest) {
       hasAccess: {
         aiAnalysis: true, // All plans get AI analysis
         websiteGeneration: true, // All plans get website generation
-        analytics: currentPlan !== 'basic',
+        pageSpeedAnalysis: true, // All plans get page speed analysis
+        analytics: true, // Now all plans get analytics!
         apiAccess: currentPlan === 'enterprise',
         customDomains: currentPlan !== 'basic',
-        prioritySupport: currentPlan !== 'basic'
+        prioritySupport: currentPlan !== 'basic',
+        unlimitedWebsites: currentPlan === 'enterprise'
+      },
+      planLimits: {
+        websites: currentPlan === 'enterprise' ? 999999 : 
+                 currentPlan === 'pro' ? 25 : 5,
+        monthlyAnalytics: currentPlan === 'enterprise' ? 999999 :
+                         currentPlan === 'pro' ? 10000 : 1000
       }
     });
 
@@ -97,3 +142,4 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
