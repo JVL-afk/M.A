@@ -1,124 +1,113 @@
-// app/api/stripe/checkout/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
+// src/app/api/stripe/checkout/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
 
-// Initialize Stripe with your secret key from environment variables
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16',
-})
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: '2024-06-20',
+});
 
 export async function POST(request: NextRequest) {
   try {
-    const { planId, planName, billingCycle } = await request.json()
+    const body = await request.json();
+    console.log('Received checkout request:', body);
 
-    // Validate required fields
-    if (!planId || !planName || !billingCycle) {
+    // FLEXIBLE FIELD MAPPING - Accept multiple naming conventions
+    const planId = body.planId || body.priceId || body.price_id;
+    const planName = body.planName || body.plan || body.planType || body.name;
+    const billingCycle = body.billingCycle || body.cycle || body.billing || body.interval || 'monthly';
+
+    // COMPREHENSIVE VALIDATION
+    if (!planId) {
       return NextResponse.json(
-        { error: 'Missing required fields: planId, planName, billingCycle' },
+        { 
+          error: 'Missing plan identifier', 
+          details: 'Please provide planId, priceId, or price_id',
+          receivedFields: Object.keys(body)
+        },
         { status: 400 }
-      )
+      );
     }
 
-    // Define your price IDs based on plan and billing cycle
-    const priceMap: { [key: string]: string } = {
-      'basic-monthly': process.env.STRIPE_BASIC_MONTHLY_PRICE_ID || '',
-      'basic-yearly': process.env.STRIPE_BASIC_YEARLY_PRICE_ID || '',
-      'pro-monthly': process.env.STRIPE_PRO_MONTHLY_PRICE_ID || '',
-      'pro-yearly': process.env.STRIPE_PRO_YEARLY_PRICE_ID || '',
-      'enterprise-monthly': process.env.STRIPE_ENTERPRISE_MONTHLY_PRICE_ID || '',
-      'enterprise-yearly': process.env.STRIPE_ENTERPRISE_YEARLY_PRICE_ID || '',
-    }
-
-    const priceKey = `${planName.toLowerCase()}-${billingCycle}`
-    const priceId = priceMap[priceKey]
-
-    if (!priceId) {
+    if (!planName) {
       return NextResponse.json(
-        { error: `Invalid plan configuration: ${priceKey}` },
+        { 
+          error: 'Missing plan name', 
+          details: 'Please provide planName, plan, planType, or name',
+          receivedFields: Object.keys(body)
+        },
         { status: 400 }
-      )
+      );
     }
 
-    // Create Stripe checkout session
+    // MAP PLAN NAMES TO STRIPE PRICE IDs (Update these with your actual Stripe Price IDs)
+    const PRICE_MAPPING: Record<string, string> = {
+      'basic': process.env.STRIPE_BASIC_MONTHLY_PRICE_ID || 'price_basic_monthly_default',
+      'pro': process.env.STRIPE_PRO_MONTHLY_PRICE_ID || 'price_pro_monthly_default',
+      'enterprise': process.env.STRIPE_ENTERPRISE_MONTHLY_PRICE_ID || 'price_enterprise_monthly_default',
+      // Support multiple naming conventions
+      'Basic': process.env.STRIPE_BASIC_MONTHLY_PRICE_ID || 'price_basic_monthly_default',
+      'Pro': process.env.STRIPE_PRO_MONTHLY_PRICE_ID || 'price_pro_monthly_default',
+      'Enterprise': process.env.STRIPE_ENTERPRISE_MONTHLY_PRICE_ID || 'price_enterprise_monthly_default',
+    };
+
+    // Determine the correct Stripe Price ID
+    const stripePriceId = PRICE_MAPPING[planName] || planId;
+
+    // GET USER INFO (if authentication is implemented)
+    let customerEmail = body.email || body.customerEmail || 'customer@example.com';
+    
+    // CREATE STRIPE CHECKOUT SESSION
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
         {
-          price: priceId,
+          price: stripePriceId,
           quantity: 1,
         },
       ],
-      mode: 'subscription',
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pricing`,
+      mode: 'subscription', // For recurring payments
+      customer_email: customerEmail,
       metadata: {
-        planId,
-        planName,
-        billingCycle,
+        planId: planId,
+        planName: planName,
+        billingCycle: billingCycle,
+        userId: body.userId || 'anonymous',
       },
-      subscription_data: {
-        metadata: {
-          planId,
-          planName,
-          billingCycle,
-        },
-      },
-      allow_promotion_codes: true, // Enable coupon codes
-    })
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/pricing?canceled=true`,
+      allow_promotion_codes: true,
+      billing_address_collection: 'required',
+    });
 
-    return NextResponse.json({ 
-      sessionId: session.id,
-      url: session.url 
-    })
-
-  } catch (error) {
-    console.error('Stripe checkout error:', error)
-    
-    if (error instanceof Stripe.errors.StripeError) {
-      return NextResponse.json(
-        { error: `Stripe error: ${error.message}` },
-        { status: 400 }
-      )
-    }
-
-    return NextResponse.json(
-      { error: 'Failed to create checkout session' },
-      { status: 500 }
-    )
-  }
-}
-
-// GET method for retrieving session details
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url)
-    const sessionId = searchParams.get('session_id')
-
-    if (!sessionId) {
-      return NextResponse.json(
-        { error: 'Session ID is required' },
-        { status: 400 }
-      )
-    }
-
-    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    console.log('Stripe session created successfully:', session.id);
 
     return NextResponse.json({
-      session: {
-        id: session.id,
-        payment_status: session.payment_status,
-        customer_email: session.customer_details?.email,
-        subscription_id: session.subscription,
-      }
-    })
+      sessionId: session.id,
+      url: session.url,
+      success: true,
+    });
 
-  } catch (error) {
-    console.error('Error retrieving checkout session:', error)
+  } catch (error: any) {
+    console.error('Stripe checkout error:', error);
+    
     return NextResponse.json(
-      { error: 'Failed to retrieve session' },
+      { 
+        error: 'Failed to create checkout session',
+        details: error.message,
+        type: error.type || 'unknown_error'
+      },
       { status: 500 }
-    )
+    );
   }
 }
 
+// OPTIONAL: Handle GET requests for testing
+export async function GET() {
+  return NextResponse.json({
+    message: 'Stripe Checkout API is running',
+    timestamp: new Date().toISOString(),
+    requiredFields: ['planId/priceId', 'planName/plan', 'billingCycle/cycle (optional)'],
+    supportedPlans: ['basic', 'pro', 'enterprise']
+  });
+}
 
