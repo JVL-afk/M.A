@@ -1,223 +1,309 @@
+\// src/app/api/ai/analyze-website/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import jwt from 'jsonwebtoken';
+import puppeteer from 'puppeteer';
+import * as cheerio from 'cheerio';
 
-// Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-function verifyAuth(request: NextRequest) {
-  try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) return null;
-    
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-fallback-secret-key');
-    return decoded;
-  } catch {
-    return null;
-  }
-}
-
-// Function to measure page speed
-async function measurePageSpeed(url: string) {
-  try {
-    const startTime = Date.now();
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      timeout: 15000
-    });
-    const endTime = Date.now();
-    
-    const loadTime = endTime - startTime;
-    const contentLength = parseInt(response.headers.get('content-length') || '0');
-    
-    // Calculate performance score
-    let performanceScore = 100;
-    if (loadTime > 3000) performanceScore -= 30;
-    else if (loadTime > 2000) performanceScore -= 20;
-    else if (loadTime > 1000) performanceScore -= 10;
-    
-    if (contentLength > 2000000) performanceScore -= 20; // 2MB+
-    else if (contentLength > 1000000) performanceScore -= 10; // 1MB+
-    
-    return {
-      loadTime,
-      contentLength,
-      performanceScore: Math.max(performanceScore, 0),
-      status: response.status
-    };
-  } catch (error) {
-    return {
-      loadTime: 0,
-      contentLength: 0,
-      performanceScore: 0,
-      status: 'error',
-      error: error.message
-    };
-  }
+interface AnalysisResult {
+  url: string;
+  title: string;
+  description: string;
+  keywords: string[];
+  wordCount: number;
+  headings: {
+    h1: string[];
+    h2: string[];
+    h3: string[];
+  };
+  images: {
+    total: number;
+    withAlt: number;
+    withoutAlt: number;
+  };
+  links: {
+    internal: number;
+    external: number;
+    total: number;
+  };
+  seo: {
+    score: number;
+    issues: string[];
+    recommendations: string[];
+  };
+  performance: {
+    loadTime: number;
+    pageSize: string;
+  };
+  content: {
+    quality: string;
+    readability: string;
+    structure: string;
+  };
+  affiliate: {
+    potentialLinks: number;
+    amazonLinks: number;
+    otherAffiliateLinks: number;
+  };
 }
 
 export async function POST(request: NextRequest) {
+  let browser;
+  
   try {
-    // Verify authentication
-    const user = verifyAuth(request);
-    if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
-    }
+    const body = await request.json();
+    const { url, analysisType = 'full' } = body;
 
-    const { url } = await request.json();
-
+    // COMPREHENSIVE URL VALIDATION
     if (!url) {
       return NextResponse.json(
-        { error: 'Website URL is required' },
+        { error: 'URL is required' },
         { status: 400 }
       );
     }
 
-    // Validate URL
+    // Normalize URL
+    let normalizedUrl = url.trim();
+    if (!normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = 'https://' + normalizedUrl;
+    }
+
+    // Validate URL format
     try {
-      new URL(url);
-    } catch {
+      new URL(normalizedUrl);
+    } catch (e) {
       return NextResponse.json(
         { error: 'Invalid URL format' },
         { status: 400 }
       );
     }
 
-    // Measure page speed first
-    const pageSpeedData = await measurePageSpeed(url);
+    console.log(`Starting analysis for: ${normalizedUrl}`);
 
-    // Fetch website content for analysis
-    let websiteContent = '';
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        timeout: 15000
-      });
-      
-      if (response.ok) {
-        const html = await response.text();
-        
-        // Extract meaningful content
-        const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-        const descMatch = html.match(/<meta[^>]*name="description"[^>]*content="([^"]+)"/i);
-        const h1Matches = html.match(/<h1[^>]*>([^<]+)<\/h1>/gi);
-        const h2Matches = html.match(/<h2[^>]*>([^<]+)<\/h2>/gi);
-        
-        websiteContent = `
-        Title: ${titleMatch ? titleMatch[1] : 'No title found'}
-        Description: ${descMatch ? descMatch[1] : 'No description found'}
-        H1 Headers: ${h1Matches ? h1Matches.map(h => h.replace(/<[^>]*>/g, '')).join(', ') : 'None'}
-        H2 Headers: ${h2Matches ? h2Matches.slice(0, 5).map(h => h.replace(/<[^>]*>/g, '')).join(', ') : 'None'}
-        Content Length: ${html.length} characters
-        Has Images: ${html.includes('<img') ? 'Yes' : 'No'}
-        Has Forms: ${html.includes('<form') ? 'Yes' : 'No'}
-        Has Analytics: ${html.includes('google-analytics') || html.includes('gtag') ? 'Yes' : 'No'}
-        `;
-      } else {
-        websiteContent = `Failed to fetch content. Status: ${response.status}`;
-      }
-    } catch (error) {
-      websiteContent = `Error fetching content: ${error.message}`;
-    }
-
-    // Generate AI analysis with Gemini
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-
-    const prompt = `Analyze this website comprehensively and provide actionable insights:
-
-URL: ${url}
-Page Speed: ${pageSpeedData.loadTime}ms (Score: ${pageSpeedData.performanceScore}/100)
-Content Size: ${pageSpeedData.contentLength} bytes
-
-Website Content Analysis:
-${websiteContent}
-
-Provide a detailed analysis covering:
-
-1. **SEO OPTIMIZATION**
-   - Title and meta description quality
-   - Header structure and keyword usage
-   - Content optimization opportunities
-   - Technical SEO issues
-
-2. **PERFORMANCE ANALYSIS**
-   - Page load speed assessment
-   - Content size optimization
-   - Performance improvement recommendations
-
-3. **USER EXPERIENCE**
-   - Design and layout evaluation
-   - Mobile responsiveness indicators
-   - Navigation and usability
-
-4. **CONVERSION OPTIMIZATION**
-   - Call-to-action effectiveness
-   - Trust signals and credibility
-   - Form optimization opportunities
-
-5. **TECHNICAL RECOMMENDATIONS**
-   - Code optimization suggestions
-   - Security considerations
-   - Best practices implementation
-
-6. **COMPETITIVE ADVANTAGES**
-   - Unique selling propositions
-   - Market positioning
-   - Differentiation opportunities
-
-Provide specific, actionable recommendations for each area. Be detailed and professional.
-Focus on practical improvements that can increase conversions and revenue.`;
-
-    const result = await model.generateContent(prompt);
-    const analysis = result.response.text();
-
-    return NextResponse.json({
-      success: true,
-      url,
-      analysis,
-      pageSpeed: {
-        loadTime: pageSpeedData.loadTime,
-        contentSize: pageSpeedData.contentLength,
-        performanceScore: pageSpeedData.performanceScore,
-        status: pageSpeedData.status,
-        recommendations: pageSpeedData.loadTime > 3000 ? 
-          ['Optimize images', 'Minify CSS/JS', 'Enable compression', 'Use CDN'] :
-          pageSpeedData.loadTime > 1000 ?
-          ['Optimize images', 'Minify resources'] :
-          ['Great performance!']
-      },
-      timestamp: new Date().toISOString(),
-      contentLength: websiteContent.length,
-      aiModel: 'Gemini Pro'
+    // LAUNCH PUPPETEER WITH ROBUST CONFIGURATION
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-gpu'
+      ],
     });
 
-  } catch (error) {
-    console.error('AI Analysis error:', error);
+    const page = await browser.newPage();
+
+    // SET REALISTIC USER AGENT
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+    // SET VIEWPORT
+    await page.setViewport({ width: 1920, height: 1080 });
+
+    // PERFORMANCE TRACKING
+    const startTime = Date.now();
+
+    // NAVIGATE WITH TIMEOUT AND ERROR HANDLING
+    try {
+      await page.goto(normalizedUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
+    } catch (navigationError: any) {
+      console.error('Navigation error:', navigationError.message);
+      
+      if (navigationError.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
+        return NextResponse.json(
+          { error: 'Website not found. Please check the URL.' },
+          { status: 404 }
+        );
+      }
+      
+      if (navigationError.message.includes('timeout')) {
+        return NextResponse.json(
+          { error: 'Website took too long to load. Please try again.' },
+          { status: 408 }
+        );
+      }
+      
+      return NextResponse.json(
+        { error: 'Unable to access website. Please check the URL and try again.' },
+        { status: 400 }
+      );
+    }
+
+    const loadTime = Date.now() - startTime;
+
+    // GET PAGE CONTENT
+    const content = await page.content();
+    const $ = cheerio.load(content);
+
+    // COMPREHENSIVE ANALYSIS
+    const analysis: AnalysisResult = {
+      url: normalizedUrl,
+      title: $('title').text().trim() || 'No title found',
+      description: $('meta[name="description"]').attr('content') || 'No description found',
+      keywords: ($('meta[name="keywords"]').attr('content') || '').split(',').map(k => k.trim()).filter(k => k),
+      wordCount: $('body').text().split(/\s+/).filter(word => word.length > 0).length,
+      headings: {
+        h1: $('h1').map((i, el) => $(el).text().trim()).get(),
+        h2: $('h2').map((i, el) => $(el).text().trim()).get(),
+        h3: $('h3').map((i, el) => $(el).text().trim()).get(),
+      },
+      images: {
+        total: $('img').length,
+        withAlt: $('img[alt]').length,
+        withoutAlt: $('img').length - $('img[alt]').length,
+      },
+      links: {
+        internal: 0,
+        external: 0,
+        total: $('a[href]').length,
+      },
+      seo: {
+        score: 0,
+        issues: [],
+        recommendations: [],
+      },
+      performance: {
+        loadTime: loadTime,
+        pageSize: Math.round(content.length / 1024) + ' KB',
+      },
+      content: {
+        quality: 'Good',
+        readability: 'Medium',
+        structure: 'Well-structured',
+      },
+      affiliate: {
+        potentialLinks: 0,
+        amazonLinks: 0,
+        otherAffiliateLinks: 0,
+      }
+    };
+
+    // ANALYZE LINKS
+    $('a[href]').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      const fullUrl = new URL(href, normalizedUrl).href;
+      
+      if (fullUrl.includes(new URL(normalizedUrl).hostname)) {
+        analysis.links.internal++;
+      } else {
+        analysis.links.external++;
+      }
+
+      // DETECT AFFILIATE LINKS
+      if (href.includes('amazon.com') || href.includes('amzn.to')) {
+        analysis.affiliate.amazonLinks++;
+      }
+      
+      if (href.includes('?ref=') || href.includes('?aff=') || href.includes('affiliate') || href.includes('track')) {
+        analysis.affiliate.potentialLinks++;
+      }
+    });
+
+    analysis.affiliate.otherAffiliateLinks = analysis.affiliate.potentialLinks - analysis.affiliate.amazonLinks;
+
+    // SEO ANALYSIS
+    let seoScore = 100;
+    
+    if (!analysis.title || analysis.title === 'No title found') {
+      analysis.seo.issues.push('Missing page title');
+      analysis.seo.recommendations.push('Add a descriptive page title');
+      seoScore -= 20;
+    } else if (analysis.title.length < 30 || analysis.title.length > 60) {
+      analysis.seo.issues.push('Title length not optimal');
+      analysis.seo.recommendations.push('Keep title between 30-60 characters');
+      seoScore -= 10;
+    }
+
+    if (!analysis.description || analysis.description === 'No description found') {
+      analysis.seo.issues.push('Missing meta description');
+      analysis.seo.recommendations.push('Add a meta description');
+      seoScore -= 15;
+    }
+
+    if (analysis.headings.h1.length === 0) {
+      analysis.seo.issues.push('Missing H1 heading');
+      analysis.seo.recommendations.push('Add an H1 heading');
+      seoScore -= 15;
+    }
+
+    if (analysis.images.withoutAlt > 0) {
+      analysis.seo.issues.push(`${analysis.images.withoutAlt} images missing alt text`);
+      analysis.seo.recommendations.push('Add alt text to all images');
+      seoScore -= 10;
+    }
+
+    if (loadTime > 3000) {
+      analysis.seo.issues.push('Slow page load time');
+      analysis.seo.recommendations.push('Optimize page loading speed');
+      seoScore -= 10;
+    }
+
+    analysis.seo.score = Math.max(0, seoScore);
+
+    // CONTENT QUALITY ASSESSMENT
+    if (analysis.wordCount < 300) {
+      analysis.content.quality = 'Poor - Too little content';
+    } else if (analysis.wordCount < 800) {
+      analysis.content.quality = 'Fair - Could use more content';
+    } else if (analysis.wordCount < 1500) {
+      analysis.content.quality = 'Good - Adequate content';
+    } else {
+      analysis.content.quality = 'Excellent - Rich content';
+    }
+
+    await browser.close();
+
+    console.log(`Analysis completed for ${normalizedUrl}`);
+    
+    return NextResponse.json({
+      success: true,
+      analysis: analysis,
+      timestamp: new Date().toISOString(),
+    });
+
+  } catch (error: any) {
+    console.error('Analysis error:', error);
+    
+    if (browser) {
+      await browser.close();
+    }
+    
     return NextResponse.json(
-      { 
+      {
         error: 'Analysis failed',
-        details: error.message
+        details: error.message,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 }
     );
   }
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+// GET endpoint for testing
+export async function GET() {
+  return NextResponse.json({
+    message: 'Website Analysis API is running',
+    version: '2.0',
+    capabilities: [
+      'SEO analysis',
+      'Content analysis',
+      'Performance metrics',
+      'Affiliate link detection',
+      'Image optimization check',
+      'Link analysis'
+    ],
+    usage: {
+      method: 'POST',
+      body: {
+        url: 'https://example.com',
+        analysisType: 'full' // optional
+      }
+    }
   });
 }
+
 
