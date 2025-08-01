@@ -1,4 +1,4 @@
-i// src/app/api/ai/generate-website/route.ts
+// src/app/api/ai/generate-website/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 interface WebsiteGenerationRequest {
@@ -576,21 +576,49 @@ function generateAdvancedWebsite(data: WebsiteGenerationRequest): string {
         <div class="container">
             <h2 class="section-title">Top Recommended ${product}</h2>
             <div class="product-grid">
-                ${affiliateLinks.slice(0, 3).map((link, index) => `
                 <div class="product-card">
                     <div class="product-image">📦</div>
                     <div class="product-content">
-                        <div class="product-title">Premium ${product} #${index + 1}</div>
+                        <div class="product-title">Premium ${product} #1</div>
                         <div class="product-price">Best Price</div>
                         <div class="product-description">
                             Perfect for ${niche} enthusiasts. High quality, great performance, and excellent value.
                         </div>
-                        <a href="${link}" class="product-button" target="_blank" rel="noopener">
+                        <a href="${affiliateLinks[0] || '#'}" class="product-button" target="_blank" rel="noopener">
                             Check Latest Price →
                         </a>
                     </div>
                 </div>
-                `).join('')}
+                ${affiliateLinks.length > 1 ? `
+                <div class="product-card">
+                    <div class="product-image">📦</div>
+                    <div class="product-content">
+                        <div class="product-title">Premium ${product} #2</div>
+                        <div class="product-price">Best Price</div>
+                        <div class="product-description">
+                            Another excellent choice for ${niche}. Great features and reliable performance.
+                        </div>
+                        <a href="${affiliateLinks[1]}" class="product-button" target="_blank" rel="noopener">
+                            Check Latest Price →
+                        </a>
+                    </div>
+                </div>
+                ` : ''}
+                ${affiliateLinks.length > 2 ? `
+                <div class="product-card">
+                    <div class="product-image">📦</div>
+                    <div class="product-content">
+                        <div class="product-title">Premium ${product} #3</div>
+                        <div class="product-price">Best Price</div>
+                        <div class="product-description">
+                            Top-rated option for serious ${niche} enthusiasts. Premium quality guaranteed.
+                        </div>
+                        <a href="${affiliateLinks[2]}" class="product-button" target="_blank" rel="noopener">
+                            Check Latest Price →
+                        </a>
+                    </div>
+                </div>
+                ` : ''}
             </div>
         </div>
     </section>
