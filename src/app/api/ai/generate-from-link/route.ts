@@ -1,338 +1,381 @@
+// GENERATE FROM LINK API ROUTE - src/app/api/ai/generate-from-link/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as cheerio from 'cheerio';
+import { connectToDatabase } from '../../../../lib/mongodb';
+import { ObjectId } from 'mongodb';
+import jwt from 'jsonwebtoken';
 
-interface ProductData {
-  title: string;
-  description: string;
-  price: string;
-  features: string[];
-  images: string[];
-  category: string;
-  brand: string;
+// Initialize Google Gemini AI
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+// Website templates based on user plan
+const TEMPLATES = {
+  basic: ['simple-landing'],
+  pro: ['simple-landing', 'product-showcase', 'comparison-table'],
+  enterprise: ['simple-landing', 'product-showcase', 'comparison-table', 'advanced-sales', 'multi-product']
+};
+
+// Plan limits
+const PLAN_LIMITS = {
+  basic: { websites: 3, templates: 1 },
+  pro: { websites: 25, templates: 3 },
+  enterprise: { websites: 999, templates: 5 }
+};
+
+interface UserData {
+  _id: ObjectId;
+  email: string;
+  plan: string;
+  websiteCount: number;
 }
 
-async function scrapeProductData(url: string): Promise<ProductData> {
+// Extract product information from URL
+async function analyzeProductURL(url: string) {
   try {
-    console.log('🔍 Scraping product data from:', url);
-    
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
     });
     
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
     const html = await response.text();
-    const $ = cheerio.load(html);
     
-    // Extract product information using common selectors
-    const title = $('h1').first().text().trim() || 
-                  $('[data-testid="product-title"]').text().trim() ||
-                  $('title').text().trim();
-    
-    const description = $('[data-testid="product-description"]').text().trim() ||
-                       $('meta[name="description"]').attr('content') ||
-                       $('.product-description').text().trim() ||
-                       $('p').first().text().trim();
-    
-    const price = $('[data-testid="price"]').text().trim() ||
-                  $('.price').text().trim() ||
-                  $('[class*="price"]').first().text().trim();
-    
-    // Extract features from bullet points or lists
-    const features: string[] = [];
-    $('ul li, .features li, [class*="feature"] li').each((i, el) => {
-      const feature = $(el).text().trim();
-      if (feature && feature.length > 10 && feature.length < 200) {
-        features.push(feature);
-      }
-    });
-    
-    // Extract images
-    const images: string[] = [];
-    $('img').each((i, el) => {
-      const src = $(el).attr('src') || $(el).attr('data-src');
-      if (src && (src.includes('product') || src.includes('item'))) {
-        images.push(src);
-      }
-    });
-    
-    // Determine category and brand from URL and content
-    const urlParts = url.toLowerCase();
-    let category = 'general';
-    if (urlParts.includes('fitness') || urlParts.includes('sport')) category = 'fitness';
-    else if (urlParts.includes('tech') || urlParts.includes('electronic')) category = 'technology';
-    else if (urlParts.includes('beauty') || urlParts.includes('cosmetic')) category = 'beauty';
-    else if (urlParts.includes('home') || urlParts.includes('kitchen')) category = 'home';
-    
-    const brand = $('[data-testid="brand"]').text().trim() ||
-                  $('.brand').text().trim() ||
-                  $('meta[property="product:brand"]').attr('content') ||
-                  '';
+    // Extract basic information using regex patterns - FIXED REGEX SYNTAX
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const descriptionMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+    const imageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+    const priceMatch = html.match(/\$[\d,]+\.?\d*/g);
     
     return {
-      title: title || 'Premium Product',
-      description: description || 'High-quality product with excellent features',
-      price: price || '',
-      features: features.slice(0, 5), // Limit to 5 features
-      images: images.slice(0, 3), // Limit to 3 images
-      category,
-      brand
+      title: titleMatch ? titleMatch[1].trim() : 'Product',
+      description: descriptionMatch ? descriptionMatch[1].trim() : 'Amazing product with great features',
+      image: imageMatch ? imageMatch[1] : null,
+      price: priceMatch ? priceMatch[0] : '$99.99',
+      domain: new URL(url).hostname
     };
-    
   } catch (error) {
-    console.error('❌ Error scraping product data:', error);
-    
-    // Fallback: Extract basic info from URL
-    const urlParts = url.split('/');
-    const productSlug = urlParts[urlParts.length - 1] || urlParts[urlParts.length - 2];
-    const title = productSlug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-    
+    console.error('Error analyzing URL:', error);
     return {
-      title: title || 'Premium Product',
-      description: 'High-quality product with excellent features and great value',
-      price: '',
-      features: ['High quality', 'Great value', 'Excellent performance'],
-      images: [],
-      category: 'general',
-      brand: ''
+      title: 'Amazing Product',
+      description: 'Discover this incredible product with outstanding features and benefits',
+      image: null,
+      price: '$99.99',
+      domain: 'example.com'
     };
   }
 }
 
-function determineTargetAudience(productData: ProductData, category: string): string {
-  const { title, description, features } = productData;
-  const content = `${title} ${description} ${features.join(' ')}`.toLowerCase();
+// Generate website content using Gemini AI
+async function generateWebsiteContent(productInfo: any, template: string, customization: any) {
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
   
-  if (content.includes('professional') || content.includes('business') || content.includes('office')) {
-    return 'busy professionals';
-  } else if (content.includes('fitness') || content.includes('workout') || content.includes('exercise')) {
-    return 'fitness enthusiasts';
-  } else if (content.includes('student') || content.includes('study') || content.includes('college')) {
-    return 'students';
-  } else if (content.includes('parent') || content.includes('family') || content.includes('home')) {
-    return 'families';
-  } else if (content.includes('gamer') || content.includes('gaming') || content.includes('tech')) {
-    return 'tech enthusiasts';
-  } else {
-    return 'people looking for quality products';
+  const prompt = `
+Create a high-converting affiliate marketing website for the following product:
+
+Product Information:
+- Title: ${productInfo.title}
+- Description: ${productInfo.description}
+- Price: ${productInfo.price}
+- Domain: ${productInfo.domain}
+
+Template Style: ${template}
+Customization: ${JSON.stringify(customization)}
+
+Generate a complete HTML website with the following requirements:
+
+1. STRUCTURE:
+   - Professional landing page layout
+   - Clear value proposition
+   - Product benefits section
+   - Social proof/testimonials
+   - Strong call-to-action buttons
+   - Mobile-responsive design
+
+2. CONTENT:
+   - Compelling headline that grabs attention
+   - 3-5 key product benefits
+   - Emotional triggers and urgency
+   - Trust signals and guarantees
+   - Clear pricing and offer details
+
+3. DESIGN:
+   - Modern, clean aesthetic
+   - Professional color scheme
+   - Proper typography hierarchy
+   - Optimized for conversions
+   - Fast-loading CSS
+
+4. SEO OPTIMIZATION:
+   - Proper meta tags
+   - Structured data
+   - Optimized headings
+   - Alt text for images
+
+Return ONLY the complete HTML code with embedded CSS and JavaScript. Make it production-ready and conversion-optimized.
+`;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error('Gemini AI Error:', error);
+    
+    // Fallback template if AI fails
+    return generateFallbackWebsite(productInfo, template);
   }
 }
 
-function generateCallToAction(productData: ProductData): string {
-  const { price, category } = productData;
-  
-  if (price && (price.includes('$') || price.includes('€') || price.includes('£'))) {
-    return 'Buy Now';
-  } else if (category === 'fitness') {
-    return 'Start Training';
-  } else if (category === 'technology') {
-    return 'Get Yours Today';
-  } else if (category === 'beauty') {
-    return 'Transform Now';
-  } else {
-    return 'Shop Now';
+// Fallback website generation if AI fails
+function generateFallbackWebsite(productInfo: any, template: string) {
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${productInfo.title} - Get Yours Today!</title>
+    <meta name="description" content="${productInfo.description}">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+        .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 100px 0; text-align: center; }
+        .hero h1 { font-size: 3.5rem; margin-bottom: 20px; font-weight: bold; }
+        .hero p { font-size: 1.3rem; margin-bottom: 30px; opacity: 0.9; }
+        .cta-button { display: inline-block; background: #ff6b6b; color: white; padding: 15px 40px; text-decoration: none; border-radius: 50px; font-size: 1.2rem; font-weight: bold; transition: all 0.3s; }
+        .cta-button:hover { background: #ff5252; transform: translateY(-2px); }
+        .features { padding: 80px 0; background: #f8f9fa; }
+        .features h2 { text-align: center; font-size: 2.5rem; margin-bottom: 50px; }
+        .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 40px; }
+        .feature { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); text-align: center; }
+        .feature h3 { font-size: 1.5rem; margin-bottom: 15px; color: #667eea; }
+        .price-section { padding: 80px 0; text-align: center; }
+        .price { font-size: 3rem; color: #ff6b6b; font-weight: bold; margin: 20px 0; }
+        .footer { background: #333; color: white; padding: 40px 0; text-align: center; }
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2.5rem; }
+            .hero p { font-size: 1.1rem; }
+            .feature-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <section class="hero">
+        <div class="container">
+            <h1>Get ${productInfo.title} Today!</h1>
+            <p>${productInfo.description}</p>
+            <a href="#order" class="cta-button">Get Yours Now - ${productInfo.price}</a>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="container">
+            <h2>Why Choose ${productInfo.title}?</h2>
+            <div class="feature-grid">
+                <div class="feature">
+                    <h3>🚀 Premium Quality</h3>
+                    <p>Experience the highest quality standards with every purchase. We guarantee satisfaction.</p>
+                </div>
+                <div class="feature">
+                    <h3>⚡ Fast Delivery</h3>
+                    <p>Get your order delivered quickly with our expedited shipping options.</p>
+                </div>
+                <div class="feature">
+                    <h3>🛡️ Money-Back Guarantee</h3>
+                    <p>Not satisfied? Get your money back within 30 days, no questions asked.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="price-section" id="order">
+        <div class="container">
+            <h2>Special Limited Time Offer</h2>
+            <div class="price">${productInfo.price}</div>
+            <p>Don't miss out on this incredible deal!</p>
+            <a href="${productInfo.domain}" class="cta-button" target="_blank">Order Now</a>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 ${productInfo.title}. All rights reserved. | Powered by AFFILIFY</p>
+        </div>
+    </footer>
+
+    <script>
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({
+                    behavior: 'smooth'
+                });
+            });
+        });
+
+        // Add click tracking
+        document.querySelectorAll('.cta-button').forEach(button => {
+            button.addEventListener('click', function() {
+                // Track conversion
+                if (typeof gtag !== 'undefined') {
+                    gtag('event', 'conversion', {
+                        'send_to': 'AW-CONVERSION_ID/CONVERSION_LABEL',
+                        'value': ${productInfo.price.replace('$', '')},
+                        'currency': 'USD'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>`;
+}
+
+// Verify user authentication and get user data
+async function verifyUser(request: NextRequest): Promise<UserData | null> {
+  try {
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) return null;
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any;
+    
+    const { db } = await connectToDatabase();
+    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
+    
+    return user as UserData;
+  } catch (error) {
+    console.error('Auth verification error:', error);
+    return null;
   }
 }
 
+// Main API route handler
 export async function POST(request: NextRequest) {
   try {
-    const { affiliateLink, niche, product, audience, features, callToAction, template } = await request.json();
-
-    if (!affiliateLink) {
-      return NextResponse.json({ error: 'Affiliate link is required' }, { status: 400 });
+    // Verify user authentication
+    const user = await verifyUser(request);
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
     }
 
-    console.log('🚀 AI Generation from Affiliate Link:', affiliateLink);
+    // Parse request data
+    const { productUrl, template = 'simple-landing', customization = {} } = await request.json();
 
-    // Scrape product data from the affiliate link
-    const productData = await scrapeProductData(affiliateLink);
-    console.log('📊 Scraped Product Data:', productData);
-
-    // Use provided values or generate from scraped data
-    const finalNiche = niche || productData.category;
-    const finalProduct = product || productData.title;
-    const finalAudience = audience || determineTargetAudience(productData, productData.category);
-    const finalFeatures = features || productData.features.slice(0, 3);
-    const finalCallToAction = callToAction || generateCallToAction(productData);
-    const finalTemplate = template || 'Simple Landing Page';
-
-    // Initialize Google Generative AI
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    // Enhanced prompt with scraped product data
-    const prompt = `Generate a complete affiliate marketing website for the following product:
-
-PRODUCT INFORMATION (from affiliate link analysis):
-- Product Name: ${productData.title}
-- Description: ${productData.description}
-- Price: ${productData.price || 'Contact for pricing'}
-- Brand: ${productData.brand || 'Premium Brand'}
-- Key Features: ${productData.features.join(', ')}
-
-WEBSITE CONFIGURATION:
-- Niche: ${finalNiche}
-- Product/Service: ${finalProduct}
-- Target Audience: ${finalAudience}
-- Key Features to Highlight: ${Array.isArray(finalFeatures) ? finalFeatures.join(', ') : finalFeatures}
-- Call to Action: ${finalCallToAction}
-- Template Style: ${finalTemplate}
-- Affiliate Link: ${affiliateLink}
-
-Create a professional, high-converting affiliate website with the following sections:
-1. Hero section with compelling headline and ${finalCallToAction} button
-2. About section explaining the product benefits based on scraped data
-3. Features section highlighting the key features from product analysis
-4. Testimonials section with realistic customer reviews for this specific product
-5. Call-to-action section with urgency and conversion focus
-
-Make the content highly specific to the actual product from the affiliate link. Use the scraped product information to create authentic, accurate copy that matches the real product.
-
-Format the response as a JSON object with this structure:
-{
-  "websiteTitle": "Compelling website title based on actual product",
-  "heroSection": {
-    "headline": "Main headline that reflects the real product",
-    "subheadline": "Supporting text based on product description",
-    "ctaText": "${finalCallToAction}"
-  },
-  "aboutSection": {
-    "title": "About section title",
-    "content": "Detailed description based on scraped product data"
-  },
-  "featuresSection": {
-    "title": "Features section title",
-    "features": [
-      {
-        "title": "Feature 1 from scraped data",
-        "description": "Feature description based on actual product"
-      },
-      {
-        "title": "Feature 2 from scraped data", 
-        "description": "Feature description based on actual product"
-      },
-      {
-        "title": "Feature 3 from scraped data",
-        "description": "Feature description based on actual product"
-      }
-    ]
-  },
-  "testimonialsSection": {
-    "title": "Testimonials section title",
-    "testimonials": [
-      {
-        "name": "Customer Name",
-        "text": "Testimonial text specific to this product",
-        "rating": 5
-      },
-      {
-        "name": "Customer Name",
-        "text": "Testimonial text specific to this product", 
-        "rating": 5
-      }
-    ]
-  },
-  "ctaSection": {
-    "title": "Final CTA title",
-    "text": "Urgency text specific to this product",
-    "buttonText": "${finalCallToAction}"
-  },
-  "affiliateLink": "${affiliateLink}",
-  "productData": {
-    "originalTitle": "${productData.title}",
-    "originalPrice": "${productData.price}",
-    "originalBrand": "${productData.brand}"
-  }
-}
-
-Make the content professional, persuasive, and specifically tailored to ${finalAudience} interested in ${finalProduct}. Base all content on the actual scraped product data to ensure accuracy and authenticity.`;
-
-    const result = await model.generateContent(prompt);
-    const aiResponse = await result.response;
-    const generatedContent = aiResponse.text();
-
-    console.log('🎉 AI Generated Content from Affiliate Link:', generatedContent);
-    
-    // Parse the AI generated content as JSON
-    let websiteData: any;
-    try {
-      // Clean the content to extract only the JSON part
-      let cleanContent = generatedContent.trim();
-      
-      // Find the first opening brace and the last closing brace that completes the JSON
-      const firstBrace = cleanContent.indexOf('{');
-      if (firstBrace !== -1) {
-        let braceCount = 0;
-        let lastValidBrace = -1;
-        
-        for (let i = firstBrace; i < cleanContent.length; i++) {
-          if (cleanContent[i] === '{') {
-            braceCount++;
-          } else if (cleanContent[i] === '}') {
-            braceCount--;
-            if (braceCount === 0) {
-              lastValidBrace = i;
-              break; // Found the complete JSON object
-            }
-          }
-        }
-        
-        if (lastValidBrace !== -1) {
-          cleanContent = cleanContent.substring(firstBrace, lastValidBrace + 1);
-        }
-      }
-      
-      websiteData = JSON.parse(cleanContent);
-    } catch (parseError) {
-      console.error('Failed to parse AI generated content as JSON:', parseError);
-      console.log('Raw content:', generatedContent);
-      
-      // Try to extract JSON manually if parsing fails
-      try {
-        const jsonMatch = generatedContent.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          websiteData = JSON.parse(jsonMatch[0]);
-        } else {
-          websiteData = { rawContent: generatedContent };
-        }
-      } catch (secondParseError) {
-        websiteData = { rawContent: generatedContent };
-      }
+    if (!productUrl) {
+      return NextResponse.json(
+        { error: 'Product URL is required' },
+        { status: 400 }
+      );
     }
 
-    // Generate a unique website URL
-    const websiteId = Math.random().toString(36).substring(2, 15);
-    const websiteUrl = `https://affilify.eu/generated/${websiteId}`;
+    // Check user plan limits
+    const userPlan = user.plan || 'basic';
+    const limits = PLAN_LIMITS[userPlan as keyof typeof PLAN_LIMITS];
+    const currentWebsiteCount = user.websiteCount || 0;
 
+    if (currentWebsiteCount >= limits.websites) {
+      return NextResponse.json(
+        { 
+          error: 'Website limit reached',
+          message: `Your ${userPlan} plan allows ${limits.websites} websites. Upgrade to create more.`,
+          upgradeRequired: true
+        },
+        { status: 403 }
+      );
+    }
+
+    // Validate template access
+    const availableTemplates = TEMPLATES[userPlan as keyof typeof TEMPLATES];
+    if (!availableTemplates.includes(template)) {
+      return NextResponse.json(
+        { 
+          error: 'Template not available',
+          message: `Template '${template}' requires a higher plan.`,
+          upgradeRequired: true
+        },
+        { status: 403 }
+      );
+    }
+
+    // Analyze product URL
+    console.log('Analyzing product URL:', productUrl);
+    const productInfo = await analyzeProductURL(productUrl);
+
+    // Generate website content using AI
+    console.log('Generating website content...');
+    const websiteHTML = await generateWebsiteContent(productInfo, template, customization);
+
+    // Generate unique slug for the website
+    const slug = `${productInfo.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}`;
+
+    // Save website to database
+    const { db } = await connectToDatabase();
+    const websiteData = {
+      _id: new ObjectId(),
+      userId: user._id,
+      slug,
+      title: productInfo.title,
+      description: productInfo.description,
+      productUrl,
+      template,
+      customization,
+      html: websiteHTML,
+      productInfo,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      views: 0,
+      clicks: 0,
+      isActive: true
+    };
+
+    await db.collection('websites').insertOne(websiteData);
+
+    // Update user website count
+    await db.collection('users').updateOne(
+      { _id: user._id },
+      { $inc: { websiteCount: 1 } }
+    );
+
+    // Return success response
     return NextResponse.json({
       success: true,
-      message: 'Website generated successfully from affiliate link!',
-      websiteUrl: websiteUrl,
-      websiteData: websiteData,
-      generatedContent: generatedContent,
-      scrapedData: productData,
-      config: {
-        niche: finalNiche,
-        product: finalProduct,
-        audience: finalAudience,
-        features: finalFeatures,
-        callToAction: finalCallToAction,
-        template: finalTemplate,
-        affiliateLink: affiliateLink
-      }
+      website: {
+        id: websiteData._id.toString(),
+        slug,
+        title: productInfo.title,
+        url: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/websites/${slug}`,
+        previewUrl: `${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/preview/${slug}`
+      },
+      message: 'Website generated successfully!'
     });
 
   } catch (error) {
-    console.error('🚨 AI Generation from Link Error:', error);
-    return NextResponse.json({
-      success: false,
-      error: 'Failed to generate website from affiliate link',
-      details: error instanceof Error ? error.message : 'Unknown error'
-    }, { status: 500 });
+    console.error('Website generation error:', error);
+    return NextResponse.json(
+      { 
+        error: 'Failed to generate website',
+        message: 'An error occurred while generating your website. Please try again.',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
   }
 }
+
+// Handle OPTIONS requests for CORS
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
