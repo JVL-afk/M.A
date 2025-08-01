@@ -1,120 +1,383 @@
-import { notFound } from 'next/navigation';
-import { connectToDatabase } from '../../../lib/mongodb';
+// WEBSITE DISPLAY COMPONENT - src/app/websites/[slug]/page.tsx
+'use client';
 
-interface WebsitePageProps {
-  params: {
-    slug: string;
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { Loader2, ExternalLink, BarChart3, Eye, MousePointer } from 'lucide-react';
+
+interface Website {
+  id: string;
+  slug: string;
+  title: string;
+  description: string;
+  html: string;
+  productUrl: string;
+  template: string;
+  createdAt: string;
+  views: number;
+  clicks: number;
+  isActive: boolean;
+  productInfo: {
+    title: string;
+    description: string;
+    price: string;
+    domain: string;
+    image?: string;
   };
 }
 
-async function getWebsiteData(slug: string) {
-  try {
-    const { db, client } = await connectToDatabase();
-    
-    try {
-      const website = await db.collection('generated_websites').findOne({ 
-        slug: slug,
-        status: 'active'
-      });
-      
-      if (!website) {
-        return null;
-      }
-      
-      // Update view count
-      await db.collection('generated_websites').updateOne(
-        { slug: slug },
-        { 
-          $inc: { 'analytics.views': 1 },
-          $set: { 'analytics.lastViewed': new Date() }
-        }
-      );
-      
-      return website;
-    } finally {
-      await client.close();
-    }
-  } catch (error) {
-    console.error('Failed to fetch website data:', error);
-    return null;
-  }
+interface Analytics {
+  views: number;
+  clicks: number;
+  conversionRate: number;
+  lastViewed: string;
 }
 
-export default async function WebsitePage({ params }: WebsitePageProps) {
-  const website = await getWebsiteData(params.slug);
+export default function WebsitePage() {
+  const params = useParams();
+  const slug = params.slug as string;
   
-  if (!website) {
-    notFound();
+  const [website, setWebsite] = useState<Website | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
+  useEffect(() => {
+    if (slug) {
+      fetchWebsite();
+      trackView();
+    }
+  }, [slug]);
+
+  const fetchWebsite = async () => {
+    try {
+      const response = await fetch(`/api/websites/${slug}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to load website');
+      }
+
+      setWebsite(data.website);
+      setAnalytics(data.analytics);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load website');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const trackView = async () => {
+    try {
+      await fetch(`/api/analytics/track-view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug })
+      });
+    } catch (error) {
+      console.error('Failed to track view:', error);
+    }
+  };
+
+  const trackClick = async () => {
+    try {
+      await fetch(`/api/analytics/track-click`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug })
+      });
+    } catch (error) {
+      console.error('Failed to track click:', error);
+    }
+  };
+
+  const handleProductClick = () => {
+    trackClick();
+    window.open(website?.productUrl, '_blank');
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+          <p className="text-white text-lg">Loading your website...</p>
+        </div>
+      </div>
+    );
   }
-  
+
+  if (error || !website) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center max-w-md mx-auto p-8">
+          <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-6 mb-6">
+            <h1 className="text-2xl font-bold text-white mb-2">Website Not Found</h1>
+            <p className="text-red-200">{error || 'The requested website could not be found.'}</p>
+          </div>
+          <a 
+            href="/dashboard" 
+            className="inline-flex items-center px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+          >
+            Return to Dashboard
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen">
-      {/* SEO Meta Tags */}
-      <head>
-        <title>{website.seo.title}</title>
-        <meta name="description" content={website.seo.description} />
-        <meta name="keywords" content={website.seo.keywords} />
-        <meta property="og:title" content={website.seo.title} />
-        <meta property="og:description" content={website.seo.description} />
-        <meta property="og:url" content={website.url} />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-      </head>
-      
-      {/* Render the AI-generated website */}
-      <div 
-        dangerouslySetInnerHTML={{ __html: website.html }}
-        className="w-full"
-      />
-      
-      {/* Analytics tracking */}
-      <script
-        dangerouslySetInnerHTML={{
-          __html: `
-            // Track affiliate link clicks
-            document.addEventListener('click', function(e) {
-              if (e.target.href && e.target.href.includes('${website.productUrl}')) {
-                fetch('/api/analytics/track-click', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ 
-                    websiteId: '${website._id}',
-                    type: 'affiliate_click',
-                    url: e.target.href
-                  })
-                });
-              }
-            });
-          `
-        }}
-      />
+    <div className="min-h-screen bg-gray-50">
+      {/* Analytics Bar */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-4">
+              <h1 className="text-lg font-semibold text-gray-900 truncate">
+                {website.title}
+              </h1>
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                Live
+              </span>
+            </div>
+            
+            <div className="flex items-center space-x-6">
+              {/* Quick Stats */}
+              <div className="hidden sm:flex items-center space-x-4 text-sm text-gray-600">
+                <div className="flex items-center space-x-1">
+                  <Eye className="w-4 h-4" />
+                  <span>{analytics?.views || 0} views</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <MousePointer className="w-4 h-4" />
+                  <span>{analytics?.clicks || 0} clicks</span>
+                </div>
+                <div className="flex items-center space-x-1">
+                  <BarChart3 className="w-4 h-4" />
+                  <span>{analytics?.conversionRate.toFixed(1) || 0}% CTR</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => setShowAnalytics(!showAnalytics)}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  Analytics
+                </button>
+                
+                <button
+                  onClick={handleProductClick}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <ExternalLink className="w-4 h-4 mr-2" />
+                  Visit Product
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Analytics Panel */}
+      {showAnalytics && analytics && (
+        <div className="bg-blue-50 border-b border-blue-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center">
+                  <Eye className="w-8 h-8 text-blue-600" />
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-500">Total Views</p>
+                    <p className="text-2xl font-semibold text-gray-900">{analytics.views}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center">
+                  <MousePointer className="w-8 h-8 text-green-600" />
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-500">Total Clicks</p>
+                    <p className="text-2xl font-semibold text-gray-900">{analytics.clicks}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center">
+                  <BarChart3 className="w-8 h-8 text-purple-600" />
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-500">Click Rate</p>
+                    <p className="text-2xl font-semibold text-gray-900">{analytics.conversionRate.toFixed(1)}%</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-lg p-4 shadow-sm">
+                <div className="flex items-center">
+                  <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                    <span className="text-orange-600 font-semibold">$</span>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-gray-500">Est. Revenue</p>
+                    <p className="text-2xl font-semibold text-gray-900">
+                      ${((analytics.clicks * 25) / 100).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Website Content */}
+      <div className="flex-1">
+        <iframe
+          srcDoc={website.html}
+          className="w-full h-screen border-0"
+          title={website.title}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+          style={{ minHeight: 'calc(100vh - 64px)' }}
+        />
+      </div>
+
+      {/* Floating Action Button for Mobile */}
+      <div className="fixed bottom-6 right-6 sm:hidden">
+        <button
+          onClick={handleProductClick}
+          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-colors"
+        >
+          <ExternalLink className="w-6 h-6" />
+        </button>
+      </div>
     </div>
   );
 }
 
-export async function generateMetadata({ params }: WebsitePageProps) {
-  const website = await getWebsiteData(params.slug);
-  
-  if (!website) {
-    return {
-      title: 'Website Not Found',
-      description: 'The requested website could not be found.'
+// API ROUTE FOR WEBSITE DATA - src/app/api/websites/[slug]/route.ts
+// This should be in a separate file: src/app/api/websites/[slug]/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '../../../../lib/mongodb';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { slug: string } }
+) {
+  try {
+    const { slug } = params;
+
+    if (!slug) {
+      return NextResponse.json(
+        { error: 'Website slug is required' },
+        { status: 400 }
+      );
+    }
+
+    const { db } = await connectToDatabase();
+    
+    // Find website by slug
+    const website = await db.collection('websites').findOne({ 
+      slug: slug,
+      isActive: true 
+    });
+
+    if (!website) {
+      return NextResponse.json(
+        { error: 'Website not found' },
+        { status: 404 }
+      );
+    }
+
+    // Calculate analytics
+    const analytics = {
+      views: website.views || 0,
+      clicks: website.clicks || 0,
+      conversionRate: website.views > 0 ? ((website.clicks || 0) / website.views) * 100 : 0,
+      lastViewed: website.lastViewedAt || website.createdAt
     };
+
+    return NextResponse.json({
+      success: true,
+      website: {
+        id: website._id.toString(),
+        slug: website.slug,
+        title: website.title,
+        description: website.description,
+        html: website.html,
+        productUrl: website.productUrl,
+        template: website.template,
+        createdAt: website.createdAt,
+        views: website.views || 0,
+        clicks: website.clicks || 0,
+        isActive: website.isActive,
+        productInfo: website.productInfo
+      },
+      analytics
+    });
+
+  } catch (error) {
+    console.error('Website fetch error:', error);
+    return NextResponse.json(
+      { 
+        error: 'Failed to fetch website',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
   }
-  
-  return {
-    title: website.seo.title,
-    description: website.seo.description,
-    keywords: website.seo.keywords,
-    openGraph: {
-      title: website.seo.title,
-      description: website.seo.description,
-      url: website.url,
-      type: 'website',
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title: website.seo.title,
-      description: website.seo.description,
-    },
-  };
+}
+
+// API ROUTE FOR VIEW TRACKING - src/app/api/analytics/track-view/route.ts
+// This should be in a separate file: src/app/api/analytics/track-view/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { connectToDatabase } from '../../../../lib/mongodb';
+
+export async function POST(request: NextRequest) {
+  try {
+    const { slug } = await request.json();
+
+    if (!slug) {
+      return NextResponse.json(
+        { error: 'Website slug is required' },
+        { status: 400 }
+      );
+    }
+
+    const { db } = await connectToDatabase();
+    
+    // Update view count
+    await db.collection('websites').updateOne(
+      { slug: slug, isActive: true },
+      { 
+        $inc: { views: 1 },
+        $set: { lastViewedAt: new Date() }
+      }
+    );
+
+    // Log detailed analytics
+    await db.collection('website_analytics').insertOne({
+      slug: slug,
+      type: 'view',
+      timestamp: new Date(),
+      userAgent: request.headers.get('user-agent'),
+      referer: request.headers.get('referer'),
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip')
+    });
+
+    return NextResponse.json({ success: true });
+
+  } catch (error) {
+    console.error('View tracking error:', error);
+    return NextResponse.json(
+      { error: 'Failed to track view' },
+      { status: 500 }
+    );
+  }
 }
