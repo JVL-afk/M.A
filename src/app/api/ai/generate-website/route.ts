@@ -1,7 +1,7 @@
-// COMPLETE AI WEBSITE GENERATION API - src/app/api/generate-website/route.ts
+// FIXED AI WEBSITE GENERATION API - src/app/api/ai/generate-website/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { connectToDatabase } from '../../../lib/mongodb';
+import { connectToDatabase } from '../../../../lib/mongodb';
 import { ObjectId } from 'mongodb';
 import jwt from 'jsonwebtoken';
 
@@ -40,10 +40,10 @@ async function analyzeProductURL(url: string) {
     
     const html = await response.text();
     
-    // Extract basic information using regex patterns
-    const titleMatch = html.match(/<title[^>]*>([^<]+)</title>/i);
-    const descriptionMatch = html.match(/<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"']+)["\'][^>]*>/i);
-    const imageMatch = html.match(/<meta[^>]*property=["\']og:image["\'][^>]*content=["\']([^"']+)["\'][^>]*>/i);
+    // Extract basic information using regex patterns - FIXED REGEX SYNTAX
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const descriptionMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["'][^>]*>/i);
+    const imageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["'][^>]*>/i);
     const priceMatch = html.match(/\$[\d,]+\.?\d*/g);
     
     return {
