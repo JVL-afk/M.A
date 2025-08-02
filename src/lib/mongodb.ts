@@ -1,3 +1,6 @@
+// FIXED MongoDB Connection - Replace /home/ubuntu/AFFILIFY/src/lib/mongodb.ts
+// This removes the deprecated bufferMaxEntries parameter that's causing the error
+
 import { MongoClient, Db } from 'mongodb';
 
 interface ConnectionResult {
@@ -27,14 +30,19 @@ export async function connectToDatabase(): Promise<ConnectionResult> {
   }
 
   try {
-    // Create new connection with optimized settings
+    // Create new connection with modern MongoDB driver options
+    // REMOVED: bufferMaxEntries (deprecated parameter causing the error)
     const client = new MongoClient(process.env.MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      bufferMaxEntries: 0,
+      // bufferMaxEntries: 0, // ❌ REMOVED - This is deprecated and causes errors
       retryWrites: true,
-      retryReads: true
+      retryReads: true,
+      // Modern connection options
+      connectTimeoutMS: 10000,
+      heartbeatFrequencyMS: 10000,
+      maxIdleTimeMS: 30000,
     });
 
     await client.connect();
@@ -53,6 +61,18 @@ export async function connectToDatabase(): Promise<ConnectionResult> {
   }
 }
 
+// Helper function to get database instance
+export async function getDatabase(): Promise<Db> {
+  const { db } = await connectToDatabase();
+  return db;
+}
+
+// Helper function to get specific collection
+export async function getCollection(collectionName: string) {
+  const db = await getDatabase();
+  return db.collection(collectionName);
+}
+
 // Graceful shutdown handler
 process.on('SIGINT', async () => {
   if (cachedClient) {
@@ -61,4 +81,5 @@ process.on('SIGINT', async () => {
   }
   process.exit(0);
 });
+
 
