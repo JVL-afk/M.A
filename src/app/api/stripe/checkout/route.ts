@@ -1,215 +1,182 @@
-// FIXED STRIPE CHECKOUT ROUTE - src/app/api/stripe/checkout/route.ts
+// FIXED Stripe Payment System
+// File: src/app/api/stripe/checkout/route.ts
+// This provides complete Stripe checkout functionality
+
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { connectToDatabase } from '../../../../lib/mongodb';
-import { ObjectId } from 'mongodb';
+import { connectToDatabase } from '../../../lib/mongodb';
 import jwt from 'jsonwebtoken';
 
-// Initialize Stripe
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-06-20',
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2023-10-16',
 });
 
-// Plan configurations
 const PLANS = {
   pro: {
+    priceId: process.env.STRIPE_PRO_PRICE_ID!,
     name: 'Pro Plan',
     price: 2900, // $29.00 in cents
-    priceId: process.env.STRIPE_PRO_PRICE_ID || 'price_pro_monthly',
-    features: [
-      '25 AI-Generated Websites',
-      '3 Premium Templates',
-      'Advanced Analytics',
-      'Priority Support',
-      'Custom Domains'
-    ],
-    limits: {
-      websites: 25,
-      templates: 3,
-      analytics: true,
-      support: 'priority'
-    }
   },
   enterprise: {
+    priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID!,
     name: 'Enterprise Plan',
     price: 9900, // $99.00 in cents
-    priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID || 'price_enterprise_monthly',
-    features: [
-      'Unlimited AI-Generated Websites',
-      '5 Premium Templates',
-      'Advanced Analytics & Reports',
-      'API Access',
-      'White-label Options',
-      'Dedicated Support',
-      'Custom Integrations'
-    ],
-    limits: {
-      websites: 999,
-      templates: 5,
-      analytics: true,
-      api: true,
-      whiteLabel: true,
-      support: 'dedicated'
-    }
-  }
+  },
 };
 
-// Verify user authentication
-async function verifyUser(request: NextRequest) {
-  try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) return null;
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any;
-    
-    const { db } = await connectToDatabase();
-    const user = await db.collection('users').findOne({ _id: new ObjectId(decoded.userId) });
-    
-    return user;
-  } catch (error) {
-    console.error('Auth verification error:', error);
-    return null;
-  }
-}
-
-// Create checkout session
 export async function POST(request: NextRequest) {
   try {
-    // Verify user authentication
-    const user = await verifyUser(request);
+    // Verify authentication
+    const token = request.cookies.get('auth-token')?.value;
+    if (!token) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    let userId: string;
+    let userEmail: string;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string; email: string };
+      userId = decoded.userId;
+      userEmail = decoded.email;
+    } catch (error) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    // Parse request body
+    const { planType } = await request.json();
+
+    if (!planType || !PLANS[planType as keyof typeof PLANS]) {
+      return NextResponse.json({ error: 'Invalid plan type' }, { status: 400 });
+    }
+
+    const plan = PLANS[planType as keyof typeof PLANS];
+
+    // Connect to database
+    const { db } = await connectToDatabase();
+
+    // Get user details
+    const user = await db.collection('users').findOne({ _id: userId });
     if (!user) {
-      return NextResponse.json(
-        { error: 'Authentication required' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const { plan, successUrl, cancelUrl } = await request.json();
-
-    // Validate plan
-    if (!PLANS[plan as keyof typeof PLANS]) {
-      return NextResponse.json(
-        { error: 'Invalid plan selected' },
-        { status: 400 }
-      );
-    }
-
-    const selectedPlan = PLANS[plan as keyof typeof PLANS];
-
-    // Check if user already has this plan or higher
-    if (user.plan === plan || (user.plan === 'enterprise' && plan === 'pro')) {
-      return NextResponse.json(
-        { error: 'You already have this plan or a higher plan' },
-        { status: 400 }
-      );
-    }
-
-    // Create or retrieve Stripe customer
-    let customerId = user.stripeCustomerId;
-    
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        name: user.name,
-        metadata: {
-          userId: user._id.toString(),
-          affilify_user: 'true'
-        }
-      });
-      
-      customerId = customer.id;
-      
-      // Update user with Stripe customer ID
-      const { db } = await connectToDatabase();
-      await db.collection('users').updateOne(
-        { _id: user._id },
-        { $set: { stripeCustomerId: customerId } }
-      );
-    }
-
-    // Create checkout session
+    // Create Stripe checkout session
     const session = await stripe.checkout.sessions.create({
-      customer: customerId,
+      customer_email: userEmail,
       payment_method_types: ['card'],
       line_items: [
         {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: selectedPlan.name,
-              description: `AFFILIFY ${selectedPlan.name} - ${selectedPlan.features.join(', ')}`,
-              images: ['https://affilify.eu/logo.png'], // Add your logo URL
-            },
-            unit_amount: selectedPlan.price,
-            recurring: {
-              interval: 'month',
-            },
-          },
+          price: plan.priceId,
           quantity: 1,
         },
       ],
       mode: 'subscription',
-      success_url: successUrl || `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?upgrade=success&plan=${plan}`,
-      cancel_url: cancelUrl || `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?upgrade=cancelled`,
+      success_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_BASE_URL}/pricing?canceled=true`,
       metadata: {
-        userId: user._id.toString(),
-        plan: plan,
-        userEmail: user.email
+        userId: userId,
+        planType: planType,
       },
       subscription_data: {
         metadata: {
-          userId: user._id.toString(),
-          plan: plan,
-          affilify_subscription: 'true'
-        }
+          userId: userId,
+          planType: planType,
+        },
       },
       allow_promotion_codes: true,
       billing_address_collection: 'required',
-      customer_update: {
-        address: 'auto',
-        name: 'auto'
-      }
     });
 
-    // Log checkout session creation
-    const { db } = await connectToDatabase();
+    // Save checkout session to database
     await db.collection('checkout_sessions').insertOne({
       sessionId: session.id,
-      userId: user._id,
-      plan: plan,
-      amount: selectedPlan.price,
+      userId: userId,
+      planType: planType,
       status: 'pending',
-      createdAt: new Date()
+      createdAt: new Date(),
     });
 
     return NextResponse.json({
       success: true,
       sessionId: session.id,
-      url: session.url
+      url: session.url,
     });
 
   } catch (error) {
-    console.error('Checkout session creation error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to create checkout session',
-        message: 'Unable to process payment. Please try again.',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    console.error('Stripe Checkout Error:', error);
+    return NextResponse.json({
+      error: 'Failed to create checkout session',
+      details: error.message,
+    }, { status: 500 });
   }
 }
 
-// Handle OPTIONS requests for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
+// Handle successful payment verification
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get('session_id');
+
+    if (!sessionId) {
+      return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
+    }
+
+    // Retrieve the checkout session from Stripe
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    if (session.payment_status === 'paid') {
+      // Connect to database
+      const { db } = await connectToDatabase();
+
+      // Update user's subscription status
+      await db.collection('users').updateOne(
+        { _id: session.metadata?.userId },
+        {
+          $set: {
+            subscription: {
+              status: 'active',
+              planType: session.metadata?.planType,
+              stripeCustomerId: session.customer,
+              stripeSubscriptionId: session.subscription,
+              currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+              updatedAt: new Date(),
+            },
+          },
+        }
+      );
+
+      // Update checkout session status
+      await db.collection('checkout_sessions').updateOne(
+        { sessionId: sessionId },
+        {
+          $set: {
+            status: 'completed',
+            completedAt: new Date(),
+          },
+        }
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment successful',
+        subscription: {
+          status: 'active',
+          planType: session.metadata?.planType,
+        },
+      });
+    }
+
+    return NextResponse.json({
+      success: false,
+      message: 'Payment not completed',
+    });
+
+  } catch (error) {
+    console.error('Payment Verification Error:', error);
+    return NextResponse.json({
+      error: 'Failed to verify payment',
+      details: error.message,
+    }, { status: 500 });
+  }
 }
 
