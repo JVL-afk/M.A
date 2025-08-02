@@ -1,19 +1,21 @@
-// FIXED STRIPE WEBHOOK HANDLER - src/app/api/stripe/webhook/route.ts
+// Stripe Webhook Handler
+// File: src/app/api/stripe/webhook/route.ts
+// This handles Stripe webhook events for subscription management
+
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { connectToDatabase } from '../../../../lib/mongodb';
-import { ObjectId } from 'mongodb';
+import { connectToDatabase } from '../../../lib/mongodb';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-06-20',
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2023-10-16',
 });
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || '';
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.text();
-    const signature = request.headers.get('stripe-signature') || '';
+    const signature = request.headers.get('stripe-signature')!;
 
     let event: Stripe.Event;
 
@@ -21,44 +23,159 @@ export async function POST(request: NextRequest) {
       event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
     } catch (err) {
       console.error('Webhook signature verification failed:', err);
-      return NextResponse.json(
-        { error: 'Webhook signature verification failed' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
+    // Connect to database
     const { db } = await connectToDatabase();
 
     // Handle the event
     switch (event.type) {
       case 'checkout.session.completed':
         const session = event.data.object as Stripe.Checkout.Session;
-        await handleCheckoutCompleted(session, db);
-        break;
+        
+        if (session.mode === 'subscription') {
+          // Update user's subscription status
+          await db.collection('users').updateOne(
+            { _id: session.metadata?.userId },
+            {
+              $set: {
+                subscription: {
+                  status: 'active',
+                  planType: session.metadata?.planType,
+                  stripeCustomerId: session.customer,
+                  stripeSubscriptionId: session.subscription,
+                  currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+                  updatedAt: new Date(),
+                },
+              },
+            }
+          );
 
-      case 'customer.subscription.created':
-        const subscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionCreated(subscription, db);
+          console.log('Subscription activated for user:', session.metadata?.userId);
+        }
         break;
 
       case 'customer.subscription.updated':
         const updatedSubscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionUpdated(updatedSubscription, db);
+        
+        // Find user by Stripe subscription ID
+        const userToUpdate = await db.collection('users').findOne({
+          'subscription.stripeSubscriptionId': updatedSubscription.id,
+        });
+
+        if (userToUpdate) {
+          await db.collection('users').updateOne(
+            { _id: userToUpdate._id },
+            {
+              $set: {
+                'subscription.status': updatedSubscription.status,
+                'subscription.currentPeriodEnd': new Date(updatedSubscription.current_period_end * 1000),
+                'subscription.updatedAt': new Date(),
+              },
+            }
+          );
+
+          console.log('Subscription updated for user:', userToUpdate._id);
+        }
         break;
 
       case 'customer.subscription.deleted':
         const deletedSubscription = event.data.object as Stripe.Subscription;
-        await handleSubscriptionDeleted(deletedSubscription, db);
+        
+        // Find user by Stripe subscription ID
+        const userToCancel = await db.collection('users').findOne({
+          'subscription.stripeSubscriptionId': deletedSubscription.id,
+        });
+
+        if (userToCancel) {
+          await db.collection('users').updateOne(
+            { _id: userToCancel._id },
+            {
+              $set: {
+                'subscription.status': 'canceled',
+                'subscription.canceledAt': new Date(),
+                'subscription.updatedAt': new Date(),
+              },
+            }
+          );
+
+          console.log('Subscription canceled for user:', userToCancel._id);
+        }
         break;
 
       case 'invoice.payment_succeeded':
         const invoice = event.data.object as Stripe.Invoice;
-        await handlePaymentSucceeded(invoice, db);
+        
+        if (invoice.subscription) {
+          // Find user by Stripe subscription ID
+          const userWithInvoice = await db.collection('users').findOne({
+            'subscription.stripeSubscriptionId': invoice.subscription,
+          });
+
+          if (userWithInvoice) {
+            // Update subscription period end
+            const subscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
+            
+            await db.collection('users').updateOne(
+              { _id: userWithInvoice._id },
+              {
+                $set: {
+                  'subscription.currentPeriodEnd': new Date(subscription.current_period_end * 1000),
+                  'subscription.updatedAt': new Date(),
+                },
+              }
+            );
+
+            // Log the payment
+            await db.collection('payments').insertOne({
+              userId: userWithInvoice._id,
+              stripeInvoiceId: invoice.id,
+              amount: invoice.amount_paid,
+              currency: invoice.currency,
+              status: 'succeeded',
+              createdAt: new Date(),
+            });
+
+            console.log('Payment succeeded for user:', userWithInvoice._id);
+          }
+        }
         break;
 
       case 'invoice.payment_failed':
         const failedInvoice = event.data.object as Stripe.Invoice;
-        await handlePaymentFailed(failedInvoice, db);
+        
+        if (failedInvoice.subscription) {
+          // Find user by Stripe subscription ID
+          const userWithFailedPayment = await db.collection('users').findOne({
+            'subscription.stripeSubscriptionId': failedInvoice.subscription,
+          });
+
+          if (userWithFailedPayment) {
+            // Log the failed payment
+            await db.collection('payments').insertOne({
+              userId: userWithFailedPayment._id,
+              stripeInvoiceId: failedInvoice.id,
+              amount: failedInvoice.amount_due,
+              currency: failedInvoice.currency,
+              status: 'failed',
+              createdAt: new Date(),
+            });
+
+            // Optionally update subscription status
+            await db.collection('users').updateOne(
+              { _id: userWithFailedPayment._id },
+              {
+                $set: {
+                  'subscription.lastPaymentFailed': true,
+                  'subscription.updatedAt': new Date(),
+                },
+              }
+            );
+
+            console.log('Payment failed for user:', userWithFailedPayment._id);
+          }
+        }
         break;
 
       default:
@@ -68,205 +185,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true });
 
   } catch (error) {
-    console.error('Webhook error:', error);
-    return NextResponse.json(
-      { error: 'Webhook processing failed' },
-      { status: 500 }
-    );
+    console.error('Webhook Error:', error);
+    return NextResponse.json({
+      error: 'Webhook handler failed',
+      details: error.message,
+    }, { status: 500 });
   }
 }
-
-// Handle successful checkout completion
-async function handleCheckoutCompleted(session: Stripe.Checkout.Session, db: any) {
-  try {
-    const userId = session.metadata?.userId;
-    const plan = session.metadata?.plan;
-
-    if (!userId || !plan) {
-      console.error('Missing metadata in checkout session');
-      return;
-    }
-
-    // Update user plan and subscription info
-    await db.collection('users').updateOne(
-      { _id: new ObjectId(userId) },
-      {
-        $set: {
-          plan: plan,
-          stripeCustomerId: session.customer,
-          stripeSubscriptionId: session.subscription,
-          planUpgradedAt: new Date(),
-          isActive: true
-        }
-      }
-    );
-
-    // Update checkout session status
-    await db.collection('checkout_sessions').updateOne(
-      { sessionId: session.id },
-      {
-        $set: {
-          status: 'completed',
-          completedAt: new Date(),
-          subscriptionId: session.subscription
-        }
-      }
-    );
-
-    // Log successful upgrade
-    await db.collection('plan_upgrades').insertOne({
-      userId: new ObjectId(userId),
-      fromPlan: 'basic', // Could be retrieved from user's previous plan
-      toPlan: plan,
-      amount: session.amount_total,
-      stripeSessionId: session.id,
-      stripeSubscriptionId: session.subscription,
-      createdAt: new Date()
-    });
-
-    console.log(`User ${userId} successfully upgraded to ${plan} plan`);
-
-  } catch (error) {
-    console.error('Error handling checkout completion:', error);
-  }
-}
-
-// Handle subscription creation
-async function handleSubscriptionCreated(subscription: Stripe.Subscription, db: any) {
-  try {
-    const userId = subscription.metadata?.userId;
-    const plan = subscription.metadata?.plan;
-
-    if (!userId || !plan) return;
-
-    await db.collection('subscriptions').insertOne({
-      userId: new ObjectId(userId),
-      stripeSubscriptionId: subscription.id,
-      stripeCustomerId: subscription.customer,
-      plan: plan,
-      status: subscription.status,
-      currentPeriodStart: new Date(subscription.current_period_start * 1000),
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      createdAt: new Date()
-    });
-
-  } catch (error) {
-    console.error('Error handling subscription creation:', error);
-  }
-}
-
-// Handle subscription updates
-async function handleSubscriptionUpdated(subscription: Stripe.Subscription, db: any) {
-  try {
-    await db.collection('subscriptions').updateOne(
-      { stripeSubscriptionId: subscription.id },
-      {
-        $set: {
-          status: subscription.status,
-          currentPeriodStart: new Date(subscription.current_period_start * 1000),
-          currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-          updatedAt: new Date()
-        }
-      }
-    );
-
-    // Update user status if subscription is cancelled or past due
-    if (subscription.status === 'canceled' || subscription.status === 'past_due') {
-      const userId = subscription.metadata?.userId;
-      if (userId) {
-        await db.collection('users').updateOne(
-          { _id: new ObjectId(userId) },
-          {
-            $set: {
-              plan: 'basic',
-              isActive: subscription.status !== 'canceled',
-              planDowngradedAt: new Date()
-            }
-          }
-        );
-      }
-    }
-
-  } catch (error) {
-    console.error('Error handling subscription update:', error);
-  }
-}
-
-// Handle subscription deletion
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription, db: any) {
-  try {
-    const userId = subscription.metadata?.userId;
-    
-    if (userId) {
-      // Downgrade user to basic plan
-      await db.collection('users').updateOne(
-        { _id: new ObjectId(userId) },
-        {
-          $set: {
-            plan: 'basic',
-            isActive: false,
-            planDowngradedAt: new Date(),
-            stripeSubscriptionId: null
-          }
-        }
-      );
-    }
-
-    // Update subscription record
-    await db.collection('subscriptions').updateOne(
-      { stripeSubscriptionId: subscription.id },
-      {
-        $set: {
-          status: 'canceled',
-          canceledAt: new Date()
-        }
-      }
-    );
-
-  } catch (error) {
-    console.error('Error handling subscription deletion:', error);
-  }
-}
-
-// Handle successful payment
-async function handlePaymentSucceeded(invoice: Stripe.Invoice, db: any) {
-  try {
-    await db.collection('payments').insertOne({
-      stripeInvoiceId: invoice.id,
-      stripeCustomerId: invoice.customer,
-      stripeSubscriptionId: invoice.subscription,
-      amount: invoice.amount_paid,
-      currency: invoice.currency,
-      status: 'succeeded',
-      paidAt: new Date(invoice.status_transitions.paid_at! * 1000),
-      createdAt: new Date()
-    });
-
-  } catch (error) {
-    console.error('Error handling payment success:', error);
-  }
-}
-
-// Handle failed payment
-async function handlePaymentFailed(invoice: Stripe.Invoice, db: any) {
-  try {
-    await db.collection('payments').insertOne({
-      stripeInvoiceId: invoice.id,
-      stripeCustomerId: invoice.customer,
-      stripeSubscriptionId: invoice.subscription,
-      amount: invoice.amount_due,
-      currency: invoice.currency,
-      status: 'failed',
-      failedAt: new Date(),
-      createdAt: new Date()
-    });
-
-    // Optionally notify user of failed payment
-    // You could send an email or create a notification here
-
-  } catch (error) {
-    console.error('Error handling payment failure:', error);
-  }
-}
-
 
