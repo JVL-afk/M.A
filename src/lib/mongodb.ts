@@ -1,5 +1,5 @@
-// FIXED MongoDB Connection - Replace /home/ubuntu/AFFILIFY/src/lib/mongodb.ts
-// This removes the deprecated bufferMaxEntries parameter that's causing the error
+// CORRECTED MongoDB Connection - Replace /home/ubuntu/AFFILIFY/src/lib/mongodb.ts
+// This fixes the import path issues and removes deprecated parameters
 
 import { MongoClient, Db } from 'mongodb';
 
