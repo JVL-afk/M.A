@@ -1,282 +1,256 @@
-// FINAL CORRECTED API KEY SYSTEM - PERFECT IMPORT PATH
-// File: src/app/api/user/api-key/route.ts
-// Only available to Enterprise plan customers
-
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '../../../../../lib/mongodb';
-import jwt from 'jsonwebtoken';
+import { requireEnterprise } from '../../../../../lib/auth-middleware';
 import crypto from 'crypto';
 
-// Generate secure API key
-function generateApiKey(): string {
-  const prefix = 'aff_';
-  const randomBytes = crypto.randomBytes(32).toString('hex');
-  return `${prefix}${randomBytes}`;
-}
-
-// Generate API secret for webhook verification
-function generateApiSecret(): string {
-  return crypto.randomBytes(64).toString('hex');
+export async function GET(request: NextRequest) {
+  try {
+    // Require Enterprise plan for API access
+    const user = await requireEnterprise(request);
+    
+    // Connect to database
+    const { db } = await connectToDatabase();
+    
+    // Get user's API keys
+    const apiKeys = await db.collection('api_keys').find({ 
+      userId: user.userId,
+      isActive: true 
+    }).sort({ createdAt: -1 }).toArray();
+    
+    // Remove sensitive key data from response
+    const safeApiKeys = apiKeys.map(key => ({
+      _id: key._id,
+      name: key.name,
+      keyPreview: `ak_${key.key.substring(0, 8)}...`,
+      permissions: key.permissions,
+      rateLimit: key.rateLimit,
+      lastUsed: key.lastUsed,
+      createdAt: key.createdAt,
+      expiresAt: key.expiresAt
+    }));
+    
+    return NextResponse.json({
+      success: true,
+      apiKeys: safeApiKeys
+    });
+    
+  } catch (error) {
+    console.error('Get API keys error:', error);
+    
+    if (error.message.includes('Enterprise plan required')) {
+      return NextResponse.json(
+        { error: 'Enterprise plan required for API access' },
+        { status: 403 }
+      );
+    }
+    
+    if (error.message.includes('authentication')) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to fetch API keys' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. VERIFY AUTHENTICATION
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) {
-      return NextResponse.json({ 
-        error: 'Authentication required',
-        code: 'AUTH_REQUIRED' 
-      }, { status: 401 });
-    }
-
-    let userId: string;
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { 
-        userId: string; 
-        plan: string; 
-      };
-      userId = decoded.userId;
-    } catch (error) {
-      return NextResponse.json({ 
-        error: 'Invalid authentication token',
-        code: 'INVALID_TOKEN' 
-      }, { status: 401 });
-    }
-
-    // 2. CONNECT TO DATABASE
-    const { db } = await connectToDatabase();
-
-    // 3. VERIFY ENTERPRISE PLAN
-    const user = await db.collection('users').findOne({ _id: userId });
-    if (!user) {
-      return NextResponse.json({ 
-        error: 'User not found',
-        code: 'USER_NOT_FOUND' 
-      }, { status: 404 });
-    }
-
-    const userPlan = user.subscription?.planType || 'basic';
-    if (userPlan !== 'enterprise') {
-      return NextResponse.json({ 
-        error: 'API key generation is only available for Enterprise plan customers',
-        code: 'ENTERPRISE_REQUIRED',
-        currentPlan: userPlan,
-        upgradeUrl: '/pricing'
-      }, { status: 403 });
-    }
-
-    // 4. PARSE REQUEST
-    const { name, description } = await request.json();
-
+    // Require Enterprise plan for API access
+    const user = await requireEnterprise(request);
+    
+    // Parse request body
+    const body = await request.json();
+    const { name, permissions, rateLimit, expiresIn } = body;
+    
+    // Validate required fields
     if (!name) {
-      return NextResponse.json({ 
-        error: 'API key name is required',
-        code: 'NAME_REQUIRED' 
-      }, { status: 400 });
+      return NextResponse.json(
+        { error: 'API key name is required' },
+        { status: 400 }
+      );
     }
-
-    // 5. CHECK API KEY LIMIT (Enterprise gets 10 API keys)
-    const existingKeys = await db.collection('api_keys').countDocuments({ 
-      userId, 
-      status: 'active' 
+    
+    // Connect to database
+    const { db } = await connectToDatabase();
+    
+    // Check if user has reached API key limit
+    const existingKeys = await db.collection('api_keys').countDocuments({
+      userId: user.userId,
+      isActive: true
     });
-
+    
     if (existingKeys >= 10) {
-      return NextResponse.json({ 
-        error: 'Maximum number of API keys reached (10)',
-        code: 'LIMIT_REACHED',
-        currentCount: existingKeys,
-        limit: 10
-      }, { status: 403 });
+      return NextResponse.json(
+        { error: 'Maximum of 10 API keys allowed per user' },
+        { status: 400 }
+      );
     }
-
-    // 6. GENERATE API KEY AND SECRET
-    const apiKey = generateApiKey();
-    const apiSecret = generateApiSecret();
-
-    // 7. SAVE TO DATABASE
-    const apiKeyDocument = {
-      userId,
-      name: name.trim(),
-      description: description?.trim() || '',
-      apiKey,
-      apiSecret,
-      status: 'active',
+    
+    // Generate secure API key
+    const keyId = crypto.randomBytes(8).toString('hex');
+    const keySecret = crypto.randomBytes(32).toString('hex');
+    const apiKey = `ak_${keyId}_${keySecret}`;
+    
+    // Calculate expiration date
+    let expiresAt = null;
+    if (expiresIn) {
+      const expirationMs = {
+        '30d': 30 * 24 * 60 * 60 * 1000,
+        '90d': 90 * 24 * 60 * 60 * 1000,
+        '1y': 365 * 24 * 60 * 60 * 1000
+      }[expiresIn];
+      
+      if (expirationMs) {
+        expiresAt = new Date(Date.now() + expirationMs);
+      }
+    }
+    
+    // Create API key record
+    const apiKeyRecord = {
+      userId: user.userId,
+      name,
+      key: apiKey,
+      permissions: permissions || ['read'],
+      rateLimit: rateLimit || 1000,
+      isActive: true,
+      lastUsed: null,
       createdAt: new Date(),
-      lastUsedAt: null,
-      usageCount: 0,
-      permissions: [
-        'ai:generate-website',
-        'websites:list',
-        'websites:view',
-        'analytics:view'
-      ],
-      rateLimit: {
-        requestsPerMinute: 100,
-        requestsPerHour: 1000,
-        requestsPerDay: 10000
-      }
+      expiresAt
     };
-
-    const result = await db.collection('api_keys').insertOne(apiKeyDocument);
-
-    // 8. LOG API KEY CREATION
-    await db.collection('api_key_logs').insertOne({
-      userId,
-      apiKeyId: result.insertedId,
-      action: 'created',
-      timestamp: new Date(),
-      metadata: {
-        name,
-        description
-      }
+    
+    const result = await db.collection('api_keys').insertOne(apiKeyRecord);
+    
+    // Log API key creation
+    await db.collection('audit_logs').insertOne({
+      userId: user.userId,
+      action: 'api_key_created',
+      details: {
+        keyId: result.insertedId,
+        keyName: name,
+        permissions
+      },
+      timestamp: new Date()
     });
-
+    
     return NextResponse.json({
       success: true,
       apiKey: {
-        id: result.insertedId,
+        _id: result.insertedId,
         name,
-        description,
-        apiKey, // Only shown once during creation
-        createdAt: new Date(),
-        permissions: apiKeyDocument.permissions,
-        rateLimit: apiKeyDocument.rateLimit
+        key: apiKey, // Only show full key on creation
+        keyPreview: `ak_${keyId}...`,
+        permissions: apiKeyRecord.permissions,
+        rateLimit: apiKeyRecord.rateLimit,
+        createdAt: apiKeyRecord.createdAt,
+        expiresAt: apiKeyRecord.expiresAt
       },
-      warning: 'Store this API key securely. It will not be shown again.',
-      documentation: '/docs/api'
+      warning: 'Store this API key securely. It will not be shown again.'
     });
-
-  } catch (error: any) {
-    console.error('API Key Generation Error:', error);
-
-    // Log error
-    try {
-      const { db } = await connectToDatabase();
-      await db.collection('error_logs').insertOne({
-        error: error.message,
-        stack: error.stack,
-        endpoint: '/api/user/api-key',
-        timestamp: new Date(),
-        type: 'api_key_generation_error',
-      });
-    } catch (logError) {
-      console.error('Failed to log error:', logError);
-    }
-
-    return NextResponse.json({
-      error: 'Failed to generate API key',
-      code: 'GENERATION_FAILED',
-      details: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
-    }, { status: 500 });
-  }
-}
-
-// GET - List user's API keys
-export async function GET(request: NextRequest) {
-  try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
-    const { db } = await connectToDatabase();
-
-    // Verify Enterprise plan
-    const user = await db.collection('users').findOne({ _id: decoded.userId });
-    const userPlan = user?.subscription?.planType || 'basic';
     
-    if (userPlan !== 'enterprise') {
-      return NextResponse.json({ 
-        error: 'API keys are only available for Enterprise plan customers',
-        currentPlan: userPlan 
-      }, { status: 403 });
+  } catch (error) {
+    console.error('Create API key error:', error);
+    
+    if (error.message.includes('Enterprise plan required')) {
+      return NextResponse.json(
+        { error: 'Enterprise plan required for API access' },
+        { status: 403 }
+      );
     }
-
-    const apiKeys = await db.collection('api_keys')
-      .find({ userId: decoded.userId })
-      .sort({ createdAt: -1 })
-      .toArray();
-
-    return NextResponse.json({
-      success: true,
-      apiKeys: apiKeys.map(key => ({
-        id: key._id,
-        name: key.name,
-        description: key.description,
-        status: key.status,
-        createdAt: key.createdAt,
-        lastUsedAt: key.lastUsedAt,
-        usageCount: key.usageCount,
-        permissions: key.permissions,
-        rateLimit: key.rateLimit,
-        // Never return the actual API key in list view
-        apiKey: `${key.apiKey.substring(0, 12)}...`
-      }))
-    });
-
-  } catch (error: any) {
-    console.error('Get API Keys Error:', error);
-    return NextResponse.json({
-      error: 'Failed to fetch API keys',
-      details: error.message
-    }, { status: 500 });
+    
+    if (error.message.includes('authentication')) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to create API key' },
+      { status: 500 }
+    );
   }
 }
 
-// DELETE - Revoke API key
 export async function DELETE(request: NextRequest) {
   try {
-    const token = request.cookies.get('auth-token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    // Require Enterprise plan for API access
+    const user = await requireEnterprise(request);
+    
+    // Get API key ID from query params
     const { searchParams } = new URL(request.url);
-    const apiKeyId = searchParams.get('id');
-
-    if (!apiKeyId) {
-      return NextResponse.json({ error: 'API key ID required' }, { status: 400 });
+    const keyId = searchParams.get('keyId');
+    
+    if (!keyId) {
+      return NextResponse.json(
+        { error: 'API key ID is required' },
+        { status: 400 }
+      );
     }
-
+    
+    // Connect to database
     const { db } = await connectToDatabase();
-
-    // Update API key status to revoked
+    
+    // Deactivate the API key (soft delete)
     const result = await db.collection('api_keys').updateOne(
-      { _id: apiKeyId, userId: decoded.userId },
       { 
-        $set: { 
-          status: 'revoked',
-          revokedAt: new Date()
+        _id: keyId,
+        userId: user.userId 
+      },
+      {
+        $set: {
+          isActive: false,
+          deactivatedAt: new Date()
         }
       }
     );
-
+    
     if (result.matchedCount === 0) {
-      return NextResponse.json({ error: 'API key not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'API key not found' },
+        { status: 404 }
+      );
     }
-
-    // Log revocation
-    await db.collection('api_key_logs').insertOne({
-      userId: decoded.userId,
-      apiKeyId,
-      action: 'revoked',
+    
+    // Log API key deletion
+    await db.collection('audit_logs').insertOne({
+      userId: user.userId,
+      action: 'api_key_deleted',
+      details: {
+        keyId
+      },
       timestamp: new Date()
     });
-
+    
     return NextResponse.json({
       success: true,
-      message: 'API key revoked successfully'
+      message: 'API key deactivated successfully'
     });
-
-  } catch (error: any) {
-    console.error('Revoke API Key Error:', error);
-    return NextResponse.json({
-      error: 'Failed to revoke API key',
-      details: error.message
-    }, { status: 500 });
+    
+  } catch (error) {
+    console.error('Delete API key error:', error);
+    
+    if (error.message.includes('Enterprise plan required')) {
+      return NextResponse.json(
+        { error: 'Enterprise plan required for API access' },
+        { status: 403 }
+      );
+    }
+    
+    if (error.message.includes('authentication')) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to delete API key' },
+      { status: 500 }
+    );
   }
 }
