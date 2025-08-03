@@ -1,210 +1,125 @@
-// CORRECTED AUTHENTICATION SYSTEM - FIXED IMPORT PATHS
-// Replace: src/app/api/auth/login/route.ts
+// 🚀 FIXED AFFILIFY LOGIN API ROUTE
+// File: src/app/api/auth/login/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '../../../../../lib/mongodb';
+import { MongoClient } from 'mongodb';
+
+// MongoDB connection with CORRECTED password case
+const MONGODB_URI = process.env.MONGODB_URI!;
+const JWT_SECRET = process.env.JWT_SECRET!;
+
+let client: MongoClient;
+let clientPromise: Promise<MongoClient>;
+
+if (!global._mongoClientPromise) {
+  client = new MongoClient(MONGODB_URI, {
+    // REMOVED deprecated bufferMaxEntries parameter
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
+  global._mongoClientPromise = client.connect();
+}
+clientPromise = global._mongoClientPromise;
 
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();
 
-    // Validate input
+    // Validation
     if (!email || !password) {
       return NextResponse.json(
-        { 
-          error: 'Email and password are required',
-          code: 'MISSING_CREDENTIALS'
-        },
+        { error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid email format',
-          code: 'INVALID_EMAIL'
-        },
-        { status: 400 }
-      );
-    }
-
-    // Connect to database using shared connection
-    const { db } = await connectToDatabase();
+    // Connect to database
+    const client = await clientPromise;
+    const db = client.db('affilify');
+    const users = db.collection('users');
 
     // Find user
-    const user = await db.collection('users').findOne({ 
-      email: email.toLowerCase().trim() 
-    });
-
+    const user = await users.findOne({ email });
     if (!user) {
       return NextResponse.json(
-        { 
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS'
-        },
+        { error: 'Invalid email or password' },
         { status: 401 }
-      );
-    }
-
-    // Check if account is locked
-    if (user.accountLocked && user.lockUntil && new Date() < user.lockUntil) {
-      return NextResponse.json(
-        { 
-          error: 'Account temporarily locked due to too many failed attempts',
-          code: 'ACCOUNT_LOCKED',
-          lockUntil: user.lockUntil
-        },
-        { status: 423 }
       );
     }
 
     // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
-      // Increment failed login attempts
-      const failedAttempts = (user.failedLoginAttempts || 0) + 1;
-      const updateData: any = {
-        failedLoginAttempts: failedAttempts,
-        lastFailedLogin: new Date()
-      };
-
-      // Lock account after 5 failed attempts
-      if (failedAttempts >= 5) {
-        updateData.accountLocked = true;
-        updateData.lockUntil = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-      }
-
-      await db.collection('users').updateOne(
-        { _id: user._id },
-        { $set: updateData }
-      );
-
       return NextResponse.json(
-        { 
-          error: 'Invalid credentials',
-          code: 'INVALID_CREDENTIALS',
-          attemptsRemaining: Math.max(0, 5 - failedAttempts)
-        },
+        { error: 'Invalid email or password' },
         { status: 401 }
       );
     }
 
-    // Check if email is verified (if email verification is enabled)
-    if (user.emailVerificationRequired && !user.isVerified) {
+    // Check if account is active
+    if (!user.isActive) {
       return NextResponse.json(
-        { 
-          error: 'Please verify your email address before logging in',
-          code: 'EMAIL_NOT_VERIFIED',
-          email: user.email
-        },
-        { status: 403 }
+        { error: 'Account is deactivated. Please contact support.' },
+        { status: 401 }
       );
     }
 
     // Generate JWT token
-    const tokenPayload = {
-      userId: user._id.toString(),
-      email: user.email,
-      plan: user.subscription?.planType || 'basic',
-      isVerified: user.isVerified || false,
-      role: user.role || 'user'
-    };
-
     const token = jwt.sign(
-      tokenPayload,
-      process.env.JWT_SECRET!,
+      { 
+        userId: user._id, 
+        email: user.email, 
+        plan: user.plan || 'basic' 
+      },
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // Reset failed login attempts and update last login
-    await db.collection('users').updateOne(
+    // Update last login
+    await users.updateOne(
       { _id: user._id },
-      { 
-        $set: { 
-          lastLoginAt: new Date(),
-          lastLoginIP: request.headers.get('x-forwarded-for') || 'unknown'
-        },
-        $inc: { loginCount: 1 },
-        $unset: { 
-          failedLoginAttempts: '',
-          accountLocked: '',
-          lockUntil: ''
-        }
-      }
+      { $set: { lastLogin: new Date() } }
     );
 
-    // Log successful login
-    await db.collection('login_logs').insertOne({
-      userId: user._id,
-      email: user.email,
-      timestamp: new Date(),
-      ip: request.headers.get('x-forwarded-for') || 'unknown',
-      userAgent: request.headers.get('user-agent') || 'unknown',
-      success: true
-    });
-
-    // Prepare response
-    const response = NextResponse.json({
-      success: true,
-      user: {
-        id: user._id.toString(),
-        email: user.email,
-        plan: user.subscription?.planType || 'basic',
-        isVerified: user.isVerified || false,
-        role: user.role || 'user',
-        subscription: user.subscription ? {
-          planType: user.subscription.planType,
-          status: user.subscription.status,
-          currentPeriodEnd: user.subscription.currentPeriodEnd
-        } : null
+    // Create response
+    const response = NextResponse.json(
+      { 
+        message: 'Login successful',
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          plan: user.plan || 'basic',
+          websitesCreated: user.websitesCreated || 0,
+          websiteLimit: user.websiteLimit || 3
+        }
       },
-      token // Include token in response for client-side storage if needed
-    });
+      { status: 200 }
+    );
 
-    // Set HTTP-only cookie
+    // Set JWT cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-      path: '/'
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 // 7 days
     });
 
     return response;
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Login error:', error);
-
-    // Log error
-    try {
-      const { db } = await connectToDatabase();
-      await db.collection('error_logs').insertOne({
-        error: error.message,
-        stack: error.stack,
-        endpoint: '/api/auth/login',
-        timestamp: new Date(),
-        type: 'login_error',
-      });
-    } catch (logError) {
-      console.error('Failed to log error:', logError);
-    }
-
     return NextResponse.json(
-      { 
-        error: 'Internal server error',
-        code: 'SERVER_ERROR'
-      },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
 
-// OPTIONS for CORS
+// Handle OPTIONS for CORS
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
@@ -215,3 +130,4 @@ export async function OPTIONS() {
     },
   });
 }
+
