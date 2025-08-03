@@ -1,9 +1,9 @@
-// REAL AI GENERATION SYSTEM - REPLACE FAKE IMPLEMENTATION
+// CORRECTED AI GENERATION SYSTEM - FIXED IMPORT PATHS
 // Replace: src/app/api/ai/generate-website/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { connectToDatabase } from '../../../lib/mongodb';
+import { connectToDatabase } from '../../../../../lib/mongodb';
 import jwt from 'jsonwebtoken';
 
 // Initialize Gemini AI
