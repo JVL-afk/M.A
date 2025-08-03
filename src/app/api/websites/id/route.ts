@@ -1,144 +1,242 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDatabase } from '../../../../../lib/mongodb';
-import { Collection, MongoClient, ObjectId } from 'mongodb';
-
-// Force dynamic rendering for this route
-export const dynamic = 'force-dynamic'
-
-interface GeneratedWebsite {
-  _id: ObjectId;
-  content: string;
-  createdAt: Date;
-  websiteConfig: {
-    niche?: string;
-    product?: string;
-    audience?: string;
-    features?: string[];
-    callToAction?: string;
-  };
-}
+import { authenticateRequest } from '../../../../../lib/auth-middleware';
 
 export async function GET(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    // Safely extract params with fallback
-    const params = context?.params;
-    if (!params || !params.id) {
-      return NextResponse.json({ error: 'Website ID is required' }, { status: 400 });
-    }
-
-    const { id } = params;
-
-    if (!ObjectId.isValid(id)) {
-      return NextResponse.json({ error: 'Invalid website ID format' }, { status: 400 });
-    }
-
+    const websiteId = params.id;
+    
     // Connect to database
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    const websitesCollection: Collection<GeneratedWebsite> = db.collection<GeneratedWebsite>('generated_websites');
-
-    const website = await websitesCollection.findOne({ _id: new ObjectId(id) });
-
+    const { db } = await connectToDatabase();
+    
+    // Get website details
+    const website = await db.collection('websites').findOne({
+      _id: websiteId
+    });
+    
     if (!website) {
-      return NextResponse.json({ error: 'Website not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Website not found' },
+        { status: 404 }
+      );
     }
-
-    return NextResponse.json({ success: true, website });
+    
+    // Get analytics data
+    const analytics = await db.collection('analytics').findOne({
+      websiteId: websiteId
+    });
+    
+    // Track view if this is a public access
+    const isPublicView = !request.headers.get('authorization') && 
+                        !request.cookies.get('auth-token');
+    
+    if (isPublicView) {
+      // Increment view count
+      await db.collection('analytics').updateOne(
+        { websiteId: websiteId },
+        { 
+          $inc: { totalViews: 1 },
+          $set: { lastViewed: new Date() }
+        },
+        { upsert: true }
+      );
+      
+      // Log the view
+      await db.collection('view_logs').insertOne({
+        websiteId: websiteId,
+        timestamp: new Date(),
+        userAgent: request.headers.get('user-agent'),
+        referer: request.headers.get('referer'),
+        ip: request.headers.get('x-forwarded-for') || 
+            request.headers.get('x-real-ip') || 
+            'unknown'
+      });
+    }
+    
+    return NextResponse.json({
+      success: true,
+      website: {
+        _id: website._id,
+        name: website.name,
+        description: website.description,
+        niche: website.niche,
+        affiliateLinks: website.affiliateLinks,
+        template: website.template,
+        content: website.content,
+        status: website.status,
+        createdAt: website.createdAt,
+        updatedAt: website.updatedAt
+      },
+      analytics: {
+        views: analytics?.totalViews || 0,
+        clicks: analytics?.totalClicks || 0,
+        conversions: analytics?.totalConversions || 0,
+        revenue: analytics?.totalRevenue || 0,
+        lastViewed: analytics?.lastViewed
+      }
+    });
+    
   } catch (error) {
-    console.error('Error fetching website:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Get website error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch website' },
+      { status: 500 }
+    );
   }
 }
 
 export async function PUT(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    // Safely extract params with fallback
-    const params = context?.params;
-    if (!params || !params.id) {
-      return NextResponse.json({ error: 'Website ID is required' }, { status: 400 });
-    }
-
-    const { id } = params;
-
-    if (!ObjectId.isValid(id)) {
-      return NextResponse.json({ error: 'Invalid website ID format' }, { status: 400 });
-    }
-
+    // Authenticate the user
+    const user = await authenticateRequest(request);
+    const websiteId = params.id;
+    
+    // Parse request body
     const body = await request.json();
-    const { content, websiteConfig } = body;
-
+    const { name, description, affiliateLinks, template, content, status } = body;
+    
     // Connect to database
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    const websitesCollection: Collection<GeneratedWebsite> = db.collection<GeneratedWebsite>('generated_websites');
-
+    const { db } = await connectToDatabase();
+    
+    // Check if user owns this website
+    const website = await db.collection('websites').findOne({
+      _id: websiteId,
+      userId: user.userId
+    });
+    
+    if (!website) {
+      return NextResponse.json(
+        { error: 'Website not found or access denied' },
+        { status: 404 }
+      );
+    }
+    
+    // Prepare update object
     const updateData: any = {
       updatedAt: new Date()
     };
-
+    
+    if (name) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (affiliateLinks) updateData.affiliateLinks = affiliateLinks;
+    if (template) updateData.template = template;
     if (content) updateData.content = content;
-    if (websiteConfig) updateData.websiteConfig = websiteConfig;
-
-    const result = await websitesCollection.updateOne(
-      { _id: new ObjectId(id) },
+    if (status) updateData.status = status;
+    
+    // Update website
+    const result = await db.collection('websites').updateOne(
+      { _id: websiteId },
       { $set: updateData }
     );
-
+    
     if (result.matchedCount === 0) {
-      return NextResponse.json({ error: 'Website not found' }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Failed to update website' },
+        { status: 500 }
+      );
     }
-
-    return NextResponse.json({ 
-      success: true, 
-      message: 'Website updated successfully',
-      modifiedCount: result.modifiedCount
+    
+    // Log the update
+    await db.collection('audit_logs').insertOne({
+      userId: user.userId,
+      action: 'website_updated',
+      details: {
+        websiteId,
+        updatedFields: Object.keys(updateData).filter(key => key !== 'updatedAt')
+      },
+      timestamp: new Date()
     });
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Website updated successfully'
+    });
+    
   } catch (error) {
-    console.error('Error updating website:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Update website error:', error);
+    
+    if (error.message.includes('authentication')) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to update website' },
+      { status: 500 }
+    );
   }
 }
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { id: string } }
+  { params }: { params: { id: string } }
 ) {
   try {
-    // Safely extract params with fallback
-    const params = context?.params;
-    if (!params || !params.id) {
-      return NextResponse.json({ error: 'Website ID is required' }, { status: 400 });
-    }
-
-    const { id } = params;
-
-    if (!ObjectId.isValid(id)) {
-      return NextResponse.json({ error: 'Invalid website ID format' }, { status: 400 });
-    }
-
+    // Authenticate the user
+    const user = await authenticateRequest(request);
+    const websiteId = params.id;
+    
     // Connect to database
-    const client = await connectToDatabase();
-    const db = client.db('affilify');
-    const websitesCollection: Collection<GeneratedWebsite> = db.collection<GeneratedWebsite>('generated_websites');
-
-    const result = await websitesCollection.deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
-      return NextResponse.json({ error: 'Website not found' }, { status: 404 });
+    const { db } = await connectToDatabase();
+    
+    // Check if user owns this website
+    const website = await db.collection('websites').findOne({
+      _id: websiteId,
+      userId: user.userId
+    });
+    
+    if (!website) {
+      return NextResponse.json(
+        { error: 'Website not found or access denied' },
+        { status: 404 }
+      );
     }
-
-    return NextResponse.json({ 
-      success: true, 
+    
+    // Delete website and related data
+    await Promise.all([
+      db.collection('websites').deleteOne({ _id: websiteId }),
+      db.collection('analytics').deleteOne({ websiteId: websiteId }),
+      db.collection('view_logs').deleteMany({ websiteId: websiteId })
+    ]);
+    
+    // Log the deletion
+    await db.collection('audit_logs').insertOne({
+      userId: user.userId,
+      action: 'website_deleted',
+      details: {
+        websiteId,
+        websiteName: website.name
+      },
+      timestamp: new Date()
+    });
+    
+    return NextResponse.json({
+      success: true,
       message: 'Website deleted successfully'
     });
+    
   } catch (error) {
-    console.error('Error deleting website:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Delete website error:', error);
+    
+    if (error.message.includes('authentication')) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    return NextResponse.json(
+      { error: 'Failed to delete website' },
+      { status: 500 }
+    );
   }
 }
+
