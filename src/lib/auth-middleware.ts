@@ -1,132 +1,142 @@
-// FIXED MIDDLEWARE WITH AUTHENTICATION RESTORED
-// Replace your existing src/middleware.ts with this corrected version
+import { NextRequest } from 'next/server';
+import jwt from 'jsonwebtoken';
+import { connectToDatabase } from './mongodb';
 
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+const JWT_SECRET = process.env.JWT_SECRET || 'affilify_jwt_2025_romania_student_success_portocaliu_orange_power_gaming_affiliate_marketing_revolution_secure_token_generation_system';
 
-// List of static file extensions that should bypass middleware
-const STATIC_FILE_EXTENSIONS = [
-  '.ico', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp',
-  '.css', '.js', '.woff', '.woff2', '.ttf', '.eot',
-  '.mp4', '.webm', '.ogg', '.mp3', '.wav',
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-  '.zip', '.rar', '.7z', '.tar', '.gz'
-];
-
-// Public routes that don't require authentication
-const PUBLIC_ROUTES = [
-  '/',
-  '/login',
-  '/signup',
-  '/pricing',
-  '/features',
-  '/terms',
-  '/privacy',
-  '/docs',
-  '/checkout'
-];
-
-// Protected routes that require authentication
-const PROTECTED_ROUTES = [
-  '/dashboard'
-];
-
-// Configuration for the middleware
-export const config = {
-  matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public folder
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico|public).*)',
-  ],
-};
-
-// Simple JWT verification for Edge Runtime compatibility
-function verifyJWTToken(token: string): boolean {
+export async function authenticateRequest(request: NextRequest) {
+  const token = request.cookies.get('auth-token')?.value || 
+                request.headers.get('authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    throw new Error('No authentication token provided');
+  }
+  
   try {
-    // Basic JWT structure validation
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return false;
-    }
-
-    // Decode payload (basic validation)
-    const payload = JSON.parse(atob(parts[1]));
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
     
-    // Check if token is expired
-    if (payload.exp && payload.exp < Date.now() / 1000) {
-      return false;
+    // Verify user still exists in database
+    const { db } = await connectToDatabase();
+    const user = await db.collection('users').findOne({ _id: decoded.userId });
+    
+    if (!user) {
+      throw new Error('User not found');
     }
-
-    // Token appears valid
-    return true;
+    
+    return {
+      userId: user._id,
+      email: user.email,
+      fullName: user.fullName,
+      plan: user.plan || 'basic',
+      isVerified: user.isVerified || false,
+      createdAt: user.createdAt
+    };
   } catch (error) {
-    return false;
+    console.error('Authentication error:', error);
+    throw new Error('Invalid or expired authentication token');
   }
 }
 
-export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  // Check if the request is for a static file by extension
-  const isStaticFile = STATIC_FILE_EXTENSIONS.some(ext => 
-    pathname.toLowerCase().endsWith(ext)
-  );
-
-  // Skip middleware for static files
-  if (isStaticFile) {
-    return NextResponse.next();
+export async function requirePremium(request: NextRequest) {
+  const user = await authenticateRequest(request);
+  
+  if (user.plan === 'basic') {
+    throw new Error('Premium plan required for this feature');
   }
-
-  // Check if route is public (no authentication required)
-  const isPublicRoute = PUBLIC_ROUTES.some(route => 
-    pathname === route || pathname.startsWith(route + '/')
-  );
-
-  // Allow access to public routes
-  if (isPublicRoute) {
-    return NextResponse.next();
-  }
-
-  // Check if route requires authentication
-  const isProtectedRoute = PROTECTED_ROUTES.some(route => 
-    pathname.startsWith(route)
-  );
-
-  if (isProtectedRoute) {
-    // Get authentication token from cookies
-    const authToken = request.cookies.get('auth-token')?.value;
-    
-    if (!authToken) {
-      // No token found, redirect to login
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    // Verify the token
-    const isValidToken = verifyJWTToken(authToken);
-    
-    if (!isValidToken) {
-      // Invalid token, redirect to login
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
-      
-      // Clear invalid token
-      const response = NextResponse.redirect(loginUrl);
-      response.cookies.delete('auth-token');
-      return response;
-    }
-
-    // Token is valid, allow access
-    return NextResponse.next();
-  }
-
-  // For all other routes, continue normally
-  return NextResponse.next();
+  
+  return user;
 }
+
+export async function requireEnterprise(request: NextRequest) {
+  const user = await authenticateRequest(request);
+  
+  if (user.plan !== 'enterprise') {
+    throw new Error('Enterprise plan required for this feature');
+  }
+  
+  return user;
+}
+
+export async function generateAuthToken(userId: string, email: string) {
+  const payload = {
+    userId,
+    email,
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60) // 30 days
+  };
+  
+  return jwt.sign(payload, JWT_SECRET);
+}
+
+export async function verifyApiKey(apiKey: string) {
+  try {
+    const { db } = await connectToDatabase();
+    const keyRecord = await db.collection('api_keys').findOne({ 
+      key: apiKey,
+      isActive: true 
+    });
+    
+    if (!keyRecord) {
+      throw new Error('Invalid API key');
+    }
+    
+    // Check if key has expired
+    if (keyRecord.expiresAt && new Date() > keyRecord.expiresAt) {
+      throw new Error('API key has expired');
+    }
+    
+    // Update last used timestamp
+    await db.collection('api_keys').updateOne(
+      { _id: keyRecord._id },
+      { $set: { lastUsed: new Date() } }
+    );
+    
+    return {
+      userId: keyRecord.userId,
+      permissions: keyRecord.permissions || [],
+      rateLimit: keyRecord.rateLimit || 1000
+    };
+  } catch (error) {
+    console.error('API key verification error:', error);
+    throw error;
+  }
+}
+
+export async function rateLimitCheck(identifier: string, limit: number = 100, windowMs: number = 60000) {
+  try {
+    const { db } = await connectToDatabase();
+    const now = new Date();
+    const windowStart = new Date(now.getTime() - windowMs);
+    
+    // Clean up old entries
+    await db.collection('rate_limits').deleteMany({
+      timestamp: { $lt: windowStart }
+    });
+    
+    // Count requests in current window
+    const requestCount = await db.collection('rate_limits').countDocuments({
+      identifier,
+      timestamp: { $gte: windowStart }
+    });
+    
+    if (requestCount >= limit) {
+      throw new Error('Rate limit exceeded');
+    }
+    
+    // Record this request
+    await db.collection('rate_limits').insertOne({
+      identifier,
+      timestamp: now
+    });
+    
+    return {
+      allowed: true,
+      remaining: limit - requestCount - 1,
+      resetTime: new Date(now.getTime() + windowMs)
+    };
+  } catch (error) {
+    console.error('Rate limit check error:', error);
+    throw error;
+  }
+}
+
