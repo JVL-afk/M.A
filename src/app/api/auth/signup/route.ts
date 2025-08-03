@@ -1,102 +1,145 @@
+// 🚀 FIXED AFFILIFY SIGNUP API ROUTE
+// File: src/app/api/auth/signup/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '../../../../lib/mongodb';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { ObjectId } from 'mongodb';
+import { MongoClient } from 'mongodb';
+
+// MongoDB connection with CORRECTED password case
+const MONGODB_URI = process.env.MONGODB_URI!;
+const JWT_SECRET = process.env.JWT_SECRET!;
+
+let client: MongoClient;
+let clientPromise: Promise<MongoClient>;
+
+if (!global._mongoClientPromise) {
+  client = new MongoClient(MONGODB_URI, {
+    // REMOVED deprecated bufferMaxEntries parameter
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
+  global._mongoClientPromise = client.connect();
+}
+clientPromise = global._mongoClientPromise;
 
 export async function POST(request: NextRequest) {
   try {
-    // --- 1. Get User Data ---
-    let data;
-    const contentType = request.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      data = await request.json();
-    } else {
-      const formData = await request.formData();
-      data = Object.fromEntries(formData.entries());
-    }
+    const { fullName, email, password, confirmPassword, plan } = await request.json();
 
-    // --- 2. Validate Input (SIMPLIFIED - NO CONFIRMATION CHECK) ---
-    const { name, fullName, email, password } = data;
-
-    const finalName = name || fullName;
-
-    if (!email || !password || !finalName) {
+    // Validation
+    if (!fullName || !email || !password || !confirmPassword) {
       return NextResponse.json(
-        { success: false, error: 'Full Name, email, and password are required.' },
+        { error: 'Full name, email, and password are required' },
         { status: 400 }
       );
     }
 
-    if (password.length < 6) {
+    if (password !== confirmPassword) {
       return NextResponse.json(
-        { success: false, error: 'Password must be at least 6 characters long.' },
+        { error: 'Passwords do not match' },
         { status: 400 }
       );
     }
 
-    // --- 3. Connect to Database ---
-    const connection = await connectToDatabase();
-    const db = connection.db;
-    const usersCollection = db.collection('users');
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: 'Password must be at least 8 characters long' },
+        { status: 400 }
+      );
+    }
 
-    // --- 4. Check for Existing User ---
-    const existingUser = await usersCollection.findOne({ email: email.toLowerCase() });
+    // Connect to database
+    const client = await clientPromise;
+    const db = client.db('affilify');
+    const users = db.collection('users');
+
+    // Check if user already exists
+    const existingUser = await users.findOne({ email });
     if (existingUser) {
       return NextResponse.json(
-        { success: false, error: 'An account with this email already exists.' },
-        { status: 409 }
+        { error: 'User already exists with this email' },
+        { status: 400 }
       );
     }
 
-    // --- 5. Hash Password ---
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    // --- 6. Create New User in Database ---
+    // Create user
     const newUser = {
-      _id: new ObjectId(),
-      name: finalName,
-      email: email.toLowerCase(),
+      fullName,
+      email,
       password: hashedPassword,
-      plan: 'basic',
-      isVerified: false,
+      plan: plan || 'basic',
+      websitesCreated: 0,
+      websiteLimit: plan === 'pro' ? 10 : plan === 'enterprise' ? -1 : 3,
       createdAt: new Date(),
-      updatedAt: new Date(),
-      lastLoginAt: new Date(),
+      isActive: true,
+      subscription: {
+        status: plan === 'basic' ? 'active' : 'pending',
+        plan: plan || 'basic',
+        startDate: new Date(),
+        endDate: null
+      }
     };
 
-    const result = await usersCollection.insertOne(newUser);
+    const result = await users.insertOne(newUser);
 
-    // --- 7. Generate JWT Token ---
+    // Generate JWT token
     const token = jwt.sign(
-      { userId: result.insertedId, email: newUser.email },
-      process.env.JWT_SECRET || 'your-default-secret-key-for-development',
+      { 
+        userId: result.insertedId, 
+        email, 
+        plan: plan || 'basic' 
+      },
+      JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // --- 8. Create Response and Set Cookie ---
-    const response = NextResponse.json({
-      success: true,
-      message: 'Signup successful!',
-      userId: result.insertedId,
-    }, { status: 201 });
+    // Create response
+    const response = NextResponse.json(
+      { 
+        message: 'Account created successfully',
+        user: {
+          id: result.insertedId,
+          fullName,
+          email,
+          plan: plan || 'basic'
+        }
+      },
+      { status: 201 }
+    );
 
+    // Set JWT cookie
     response.cookies.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-    } );
+      maxAge: 7 * 24 * 60 * 60 // 7 days
+    });
 
     return response;
 
   } catch (error) {
-    console.error('SIGNUP_ERROR:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+    console.error('Signup error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to create account.', details: errorMessage },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
 }
+
+// Handle OPTIONS for CORS
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
+
