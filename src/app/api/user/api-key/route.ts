@@ -1,9 +1,9 @@
-// ENTERPRISE API KEY GENERATION SYSTEM
+// FINAL CORRECTED API KEY SYSTEM - PERFECT IMPORT PATH
 // File: src/app/api/user/api-key/route.ts
 // Only available to Enterprise plan customers
 
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '../../../lib/mongodb';
+import { connectToDatabase } from '../../../../../lib/mongodb';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 
