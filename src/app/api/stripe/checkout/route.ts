@@ -1,10 +1,10 @@
-// BULLETPROOF STRIPE PAYMENT SYSTEM
+// CORRECTED STRIPE PAYMENT SYSTEM - FIXED IMPORT PATHS
 // Replace: src/app/api/stripe/checkout/route.ts
 // Delete: src/app/api/stripe/create-checkout-session/route.ts (duplicate)
 
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { connectToDatabase } from '../../../lib/mongodb';
+import { connectToDatabase } from '../../../../lib/mongodb';
 import jwt from 'jsonwebtoken';
 
 // Initialize Stripe with proper error handling
@@ -249,5 +249,6 @@ export async function OPTIONS() {
     },
   });
 }
+
 
 
