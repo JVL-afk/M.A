@@ -1,85 +1,73 @@
-// CORRECTED MongoDB Connection - Replace /home/ubuntu/AFFILIFY/src/lib/mongodb.ts
-// This fixes the import path issues and removes deprecated parameters
+import { MongoClient } from 'mongodb';
 
-import { MongoClient, Db } from 'mongodb';
+// Fixed MongoDB URI with correct password case: Andrei18 (uppercase A)
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://andreimiroiu2019:Andrei18@affilifycluster.ppnplhx.mongodb.net/affilify?retryWrites=true&w=majority&appName=AffilifyCluster';
 
-interface ConnectionResult {
-  client: MongoClient;
-  db: Db;
+if (!MONGODB_URI) {
+  throw new Error('Please define the MONGODB_URI environment variable');
 }
 
-let cachedClient: MongoClient | null = null;
-let cachedDb: Db | null = null;
+let client: MongoClient;
+let clientPromise: Promise<MongoClient>;
 
-export async function connectToDatabase(): Promise<ConnectionResult> {
-  // Return cached connection if available
-  if (cachedClient && cachedDb) {
-    try {
-      // Test the connection
-      await cachedClient.db().admin().ping();
-      return { client: cachedClient, db: cachedDb };
-    } catch (error) {
-      console.warn('Cached connection failed, creating new connection');
-      cachedClient = null;
-      cachedDb = null;
-    }
-  }
+declare global {
+  var _mongoClientPromise: Promise<MongoClient>;
+}
 
-  if (!process.env.MONGODB_URI) {
-    throw new Error('MONGODB_URI environment variable is not defined');
-  }
-
-  try {
-    // Create new connection with modern MongoDB driver options
-    // REMOVED: bufferMaxEntries (deprecated parameter causing the error)
-    const client = new MongoClient(process.env.MONGODB_URI, {
+if (process.env.NODE_ENV === 'development') {
+  if (!global._mongoClientPromise) {
+    client = new MongoClient(MONGODB_URI, {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      // bufferMaxEntries: 0, // ❌ REMOVED - This is deprecated and causes errors
-      retryWrites: true,
-      retryReads: true,
-      // Modern connection options
-      connectTimeoutMS: 10000,
-      heartbeatFrequencyMS: 10000,
-      maxIdleTimeMS: 30000,
+      // Removed deprecated bufferMaxEntries parameter
     });
+    global._mongoClientPromise = client.connect();
+  }
+  clientPromise = global._mongoClientPromise;
+} else {
+  client = new MongoClient(MONGODB_URI, {
+    maxPoolSize: 10,
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+    // Removed deprecated bufferMaxEntries parameter
+  });
+  clientPromise = client.connect();
+}
 
-    await client.connect();
-    
+// Export all the functions that API routes need
+export { clientPromise };
+export default clientPromise;
+
+export async function connectToDatabase() {
+  try {
+    const client = await clientPromise;
     const db = client.db('affilify');
-    
-    // Cache the connection
-    cachedClient = client;
-    cachedDb = db;
-    
-    console.log('Successfully connected to MongoDB');
     return { client, db };
   } catch (error) {
-    console.error('MongoDB connection failed:', error);
-    throw new Error(`Database connection failed: ${error.message}`);
+    console.error('MongoDB connection error:', error);
+    throw error;
   }
 }
 
-// Helper function to get database instance
-export async function getDatabase(): Promise<Db> {
-  const { db } = await connectToDatabase();
-  return db;
+export async function getDatabase() {
+  const client = await clientPromise;
+  return client.db('affilify');
 }
 
-// Helper function to get specific collection
-export async function getCollection(collectionName: string) {
+// Additional utility functions for common database operations
+export async function getUserCollection() {
   const db = await getDatabase();
-  return db.collection(collectionName);
+  return db.collection('users');
 }
 
-// Graceful shutdown handler
-process.on('SIGINT', async () => {
-  if (cachedClient) {
-    await cachedClient.close();
-    console.log('MongoDB connection closed.');
-  }
-  process.exit(0);
-});
+export async function getWebsiteCollection() {
+  const db = await getDatabase();
+  return db.collection('websites');
+}
 
+export async function getAnalyticsCollection() {
+  const db = await getDatabase();
+  return db.collection('analytics');
+}
 
