@@ -1,10 +1,10 @@
-// FIXED AUTHENTICATION SYSTEM - USES SHARED MONGODB CONNECTION
+// CORRECTED AUTHENTICATION SYSTEM - FIXED IMPORT PATHS
 // Replace: src/app/api/auth/login/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { connectToDatabase } from '../../../lib/mongodb';
+import { connectToDatabase } from '../../../../../lib/mongodb';
 
 export async function POST(request: NextRequest) {
   try {
@@ -215,5 +215,3 @@ export async function OPTIONS() {
     },
   });
 }
-
-
