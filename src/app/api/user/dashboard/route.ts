@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '../../../../../lib/mongodb';
-import { authenticateRequest } from '../../../../../lib/auth-middleware';
+import { connectToDatabase } from '../../../../lib/mongodb';
+import { authenticateRequest } from '../../../../lib/auth-middleware';
 
 export async function GET(request: NextRequest) {
   try {
