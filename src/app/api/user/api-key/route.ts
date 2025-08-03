@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { connectToDatabase } from '../../../../../lib/mongodb';
-import { requireEnterprise } from '../../../../../lib/auth-middleware';
+import { connectToDatabase } from '../../../../lib/mongodb';
+import { requireEnterprise } from '../../../../lib/auth-middleware';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest) {
