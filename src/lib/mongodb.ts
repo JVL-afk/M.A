@@ -1,7 +1,7 @@
 import { MongoClient } from 'mongodb';
 
 // Fixed MongoDB URI with correct password case: Andrei18 (uppercase A)
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://andreiairolu2019:Andrei18@affilifycluster.pnphx.mongodb.net/affilify?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || '';
 
 if (!MONGODB_URI) {
   throw new Error('Please define the MONGODB_URI environment variable');
